@@ -1,0 +1,50 @@
+# EC-Earth4 conda environment file
+#
+#
+# Sample usage:
+#
+# (1) Install environment in a local ".conda" directory
+# > conda env create --prefix .conda --file environment.yml
+# > conda activate ./.conda
+#
+# (2) Install environment with name "ece4"
+# > conda env create --name ece4 --file environment.yml
+# > conda activate ece4
+
+name: ece4
+channels:
+  - conda-forge
+  - nodefaults
+dependencies:
+  - python=>3.10
+  - pip
+  - eccodes  # binary eccodes package
+  - python-eccodes  # Python API for eccodes
+  - scriptengine
+  - scriptengine-tasks-hpc
+  - scriptengine-tasks-ecearth  # Needed for ECE4 monitoring only!
+  - numpy
+  - pandas
+  - xarray
+  - netcdf4
+  - scipy
+  - xesmf
+  - jupyter
+  - tqdm
+  - timezonefinder
+  - f90nml
+  - matplotlib
+  - cartopy
+  - pyaml
+  - jinja2
+  - codetiming
+  - pip:
+    # - rdy2cpl @ git+https://github.com/bobbyantonio/rdy2cpl.git@main # This should be installed with pip install ., to ensure r2c available on command line
+    # Install mpi4py from source (sdist at PyPI), this makes sure it is build
+    # against system MPI
+    - mpi4py
+    # - eccodes
+    - xarray-regrid
+    - inotify
+    - polling2
+    - zarr
