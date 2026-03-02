@@ -72,16 +72,24 @@ if __name__ == "__main__":
                         help="save output to zarr format instead of netcdf")
     parser.add_argument('--compression-level', type=int, default=0,
                         help='Compression level for netcdf output (1-9)')
-    parser.add_argument('--ecearth-dir', type=str, default=str(Path(__file__).resolve().parent.parent),
+    parser.add_argument('--ecearth-dir', type=str, required=True,
                         help='Path to the ecearth source directory. Defaults to the parent directory of this script.')
     parser.add_argument('--src-dir', type=str, default=None,
-                        help='Path to nemo and other packages.')
+                        help='Path to nemo and other packages (defaults to sources within EC-Earth4 directory).')
     parser.add_argument('--setup-only', action='store_true',
                         help='Only setup the experiment, do not run it.')
+    parser.add_argument('--base-run-dir', type=str, default=os.path.join(os.environ['SCRATCH'], 'run_dir'),
+                        help='Base directory for run directories on HPC.')
+    parser.add_argument('--base-results-dir', type=str, default=os.path.join(os.environ['HPCPERM'], 'model_runs'),
+                        help='Base directory for results directories on HPC.')
     args = parser.parse_args()
     
     print(args)
     
+    # Base directory is the directory where this script is located
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    
+    # If src_dir is not provided, default to sources directory within the ecearth directory
     if args.src_dir is None:
         args.src_dir = os.path.join(args.ecearth_dir, 'sources')
         
@@ -106,6 +114,7 @@ if __name__ == "__main__":
     first_step_polling_timeout = config.get('first_step_polling_timeout', 12*3600)  # Timeout in seconds for polling ocean model output files on first step
     from_restart = config['from_restart']
     
+    # Directory containing ecearth scripts to compile and setup run directory
     ece_script_dir=os.path.join(args.ecearth_dir, 'scripts')
     
     global_start_date=f'{start_year}{start_month:02d}01'
@@ -143,8 +152,8 @@ if __name__ == "__main__":
         
         expid = get_experiment_id(atmosphere_source, flux_calculation, start_date, end_date, args.ensemble_member, args.experiment_nickname, nemo_version)
 
-        rundir=f'/ec/res4/scratch/ecme4254/run_dir/{expid}'
-        results_dir=f'/ec/res4/hpcperm/ecme4254/model_runs/{global_expid}'
+        rundir=f'{args.base_run_dir}/{expid}'
+        results_dir=f'{args.base_results_dir}/{global_expid}'
         router_dir=f'{rundir}/router'        
 
         if n < args.start_at_leg:
@@ -174,7 +183,7 @@ if __name__ == "__main__":
           RRULE:FREQ={frequency};INTERVAL={interval};UNTIL={end_date}
       flux_calculation: {flux_calculation}
       era5_dir: "{era5_dir}"
-      base_dir: "{args.ecearth_dir}"
+      coupling_base_dir: "{base_dir}"
       src_dir: "{args.src_dir}"
       run_dir: "{rundir}"
       results_dir: "{results_dir}"
@@ -373,7 +382,7 @@ source ~/.kshrc
 source ~/.initConda.sh
 conda activate ece4
 
-cp $PERM/repos/ecearth4/python_scripts/postprocess.py {rundir};
+cp {base_dir}/postprocess.py {rundir};
 
 cd {rundir};
 
