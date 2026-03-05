@@ -5,7 +5,7 @@
 #       extension: .py
 #       format_name: percent
 #       format_version: '1.3'
-#       jupytext_version: 1.17.1
+#       jupytext_version: 1.19.1
 #   kernelspec:
 #     display_name: ece4
 #     language: python
@@ -43,13 +43,12 @@ from scipy import signal
 # %%
 import xesmf as xe
 
-sys.path.append(str(Path(os.getcwd()).parents[1]))
+sys.path.append('/home/users/bantonio/repos/ace2_nemo_coupler')
 
-from notebook_utils.misc import is_notebook
-from eerie.coupled_experiments.coupling_processing_utils import detrend_dataarray, \
+from notebooks.coupling_processing_utils import detrend_dataarray, \
     load_ece3_data, convert_dts_to_first_of_month, calculate_en34, calculate_linear_relationship, \
     mean_areas, calculate_en34_spectra, calculate_correlation, OLEVEL_VALUES, calculate_lagged_correlations, calculate_anomalies, \
-    bjerknes_feedback_analysis, calculate_nino_index
+    bjerknes_feedback_analysis, calculate_nino_index, is_notebook
 # from notebook_utils.plotting import plot_grid_shared_axes
 
 ece3_var_lookup = {"tas": "2m_temperature", 
@@ -116,6 +115,8 @@ else:
     ace2_data_dir = args.ace2_data_dir
     var_glob_string = args.var_glob_string
     years_split = args.years.split('-')
+    base_output_dir = args.base_output_dir
+    analysis_vars = args.analysis_vars
     years = range(int(years_split[0]), int(years_split[1])+1)
 
     if debug:
