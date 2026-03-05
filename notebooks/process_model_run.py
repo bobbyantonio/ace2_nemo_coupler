@@ -45,15 +45,14 @@ import xarray_regrid
 import xesmf as xe
 import xarray_regrid
 
-sys.path.append(str(Path(os.getcwd()).parents[1]))
-from notebook_utils.misc import is_notebook
-from eerie.coupled_experiments.coupling_processing_utils import detrend_dataarray, \
+sys.path.append("/home/ecme4254/perm/repos/ace2_nemo_coupler")
+from notebooks.coupling_processing_utils import detrend_dataarray, \
     convert_dts_to_first_of_month, calculate_en34 ,calculate_linear_relationship, \
     mean_areas, calculate_en34_spectra, vertical_integral, load_ds_subset, load_nemo_ds_subset,\
     calculate_correlation, OLEVEL_VALUES, calculate_lagged_correlations, calculate_anomalies, \
-    bjerknes_feedback_analysis, calculate_nino_index
+    bjerknes_feedback_analysis, calculate_nino_index, ace2_var_lookup, is_notebook
 
-BASE_OUTPUT_DIR = '/perm/ecme4254/repos/nwp_notebooks/eerie/coupled_experiments/processed_data'
+BASE_OUTPUT_DIR = '/home/ecme4254/perm/repos/ace2_nemo_coupler/notebooks/processed_data'
 
 # %%
 if is_notebook():
@@ -114,16 +113,6 @@ atm2oce_vars = ['mean_surface_sensible_heat_flux',
 
 oce2atm_vars = ['sea_surface_temperature', 'sea_ice_fraction', 'sea_ice_thickness', 'sea_ice_temperature']
 
-ace2_var_lookup = {'TMP2m': '2m_temperature',
-                   'surface_temperature': 'surface_temperature', 
-                   'PRATEsfc': 'total_precipitation',
-                   'PRESsfc': 'surface_pressure',
-                   'Q2m': '2m_specific_humidity',
-                   'UGRD10m': '10m_u_component_of_wind',
-                   'VGRD10m': '10m_v_component_of_wind'
-                   }
-for n in range(8):
-    ace2_var_lookup[f'specific_total_water_{n}'] = f'specific_total_water_{n}'
 atmosphere_vars = list(ace2_var_lookup.keys())
 
 nemo_vars_dict = {'T': ['mldr10_1', 'ssh', 'heatc', 'toce_pot'],
