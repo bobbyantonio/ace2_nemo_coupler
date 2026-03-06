@@ -12,9 +12,15 @@ from scipy.stats import t
 mean_areas = {'Global': {'min_lat': -90, 'max_lat': 90},
               'Northern Hemisphere': {'min_lat': 0, 'max_lat': 90},
                     'Southern Hemisphere': {'min_lat': -90, 'max_lat': 0},
-                    'Tropics': {'min_lat': -30, 'max_lat': 30},
+                    'Tropics': {'min_lat': -20, 'max_lat': 20},
                     'Northern Extratropics': {'min_lat': 30, 'max_lat': 90},
-                    'Southern Extratropics': {'min_lat': -90, 'max_lat': -30}}
+                    'Southern Extratropics': {'min_lat': -90, 'max_lat': -30},
+                    'North Atlantic': {'min_lat': 20, 'max_lat': 60, 'min_lon': 280, 'max_lon': 360},
+                    'North Pacific': {'min_lat': 20, 'max_lat': 60, 'min_lon': 160, 'max_lon': 260},
+                    'South Atlantic': {'min_lat': -60, 'max_lat': -20, 'min_lon': 300, 'max_lon': 360},
+                    'South Pacific': {'min_lat': -60, 'max_lat': -20, 'min_lon': 160, 'max_lon': 260},
+                    'Tropical Atlantic': {'min_lat': -20, 'max_lat': 20, 'min_lon': 300, 'max_lon': 360},
+                    'Tropical Pacific': {'min_lat': -20, 'max_lat': 20, 'min_lon': 160, 'max_lon': 260}}
 
 ace2_var_lookup = {'TMP2m': '2m_temperature',
                    'surface_temperature': 'surface_temperature', 
@@ -248,8 +254,14 @@ def load_era5_monthly(var, era5_dir, years):
 def load_nemo_ds_subset(base_dir, glob_filename, vars_to_select, level_values, concat_dim='time', decode_times=True):
     fps = glob(os.path.join(base_dir, glob_filename))
     ds = []
-    for fp in fps:
+    for fp in sorted(fps):
+
+        date_str = fp.split('/')[-1].split('_')[-1][:6]
+        dt = pd.Timestamp(date_str + '01')
+        
         tmp_ds = xr.open_dataset(fp, decode_times=decode_times)[vars_to_select]
+        tmp_ds = tmp_ds.assign_coords({'time_counter': [dt]})
+        tmp_ds = tmp_ds.rename({'time_counter': 'time'}).drop_vars('time_centered')
 
         if 'toce_pot' in vars_to_select:
             tmp_ds = tmp_ds.sel(olevel=level_values)
