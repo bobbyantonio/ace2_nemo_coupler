@@ -7,9 +7,9 @@
 #       format_version: '1.3'
 #       jupytext_version: 1.17.1
 #   kernelspec:
-#     display_name: Python 3.11.10-01
+#     display_name: Python 3.12.9-01
 #     language: python
-#     name: python-3.11.10-01
+#     name: python-3.12.9-01
 # ---
 
 # %%
@@ -20,6 +20,27 @@ import pandas as pd
 import xarray as xr
 
 # %% [markdown]
+# ## Create forcing with constant CO2 forcing but varying surface temperature
+
+# %%
+output_folder="/home/ecme4254/scratch/ace2_forcing_data/fixedCO2_1951-2051"
+os.makedirs(output_folder, exist_ok=True)
+
+historical_dir = "/home/ecme4254/scratch/ace2_forcing_data/historical_1951-2021"
+
+ds_1951 = xr.open_dataset(os.path.join(historical_dir, "forcing_1951.nc"))
+mean_1951_co2 = ds_1951['global_mean_co2'].mean().item()
+
+for y in tqdm(range(1951, 2052)):
+    
+    tmp_ds = xr.open_dataset(os.path.join(historical_dir, f'forcing_{y}.nc'))
+    
+    # Set co2 forcing to average over 1951
+    tmp_ds['global_mean_co2'] = tmp_ds['global_mean_co2'] * 0 + mean_1951_co2
+        
+    tmp_ds.to_netcdf(os.path.join(output_folder, f'forcing_{y}.nc'))
+
+# %% [markdown]
 # ## Create constant 1951 forcing for 100 years
 
 # %%
@@ -27,9 +48,7 @@ output_folder="/home/ecme4254/scratch/ace2_forcing_data/control_1951-2051"
 os.makedirs(output_folder, exist_ok=True)
 
 # %%
-ds_1951 = xr.open_dataset("/home/ecme4254/scratch/ace2_forcing_data/forcing_data/forcing_1951.nc")
-
-# %%
+ds_1951 = xr.open_dataset("/home/ecme4254/scratch/ace2_forcing_data/historical_1951-2021/forcing_1951.nc")
 mean_1951_co2 = ds_1951['global_mean_co2'].mean().item()
 
 # %%
@@ -64,5 +83,3 @@ for y in tqdm(range(1951, 2052)):
     output_ds['global_mean_co2'] = output_ds['global_mean_co2'] * 0 + mean_1951_co2
         
     output_ds.to_netcdf(os.path.join(output_folder, f'forcing_{y}.nc'))
-
-# %%

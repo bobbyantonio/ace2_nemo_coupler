@@ -8,6 +8,8 @@
 
 source ~/.bashrc
 
+jupytext --sync notebooks/create_ace2_forcing_files.ipynb;
+
 conda activate ece4
 
-python -m python_scripts.create_ace2_forcing_files;
+python -m notebooks.create_ace2_forcing_files;

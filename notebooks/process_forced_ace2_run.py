@@ -15,54 +15,87 @@
 # %%
 import os, sys
 import datetime
+from glob import glob
 import pickle
 import pandas as pd
 import xarray as xr
+import numpy as np
 from pathlib import Path
-
+from tqdm import tqdm
 sys.path.append("/home/ecme4254/perm/repos/ace2_nemo_coupler")
 from notebooks.coupling_processing_utils import calculate_linear_relationship, calculate_anomalies, ace2_var_lookup, is_notebook
 
 # %%
-BASE_OUTPUT_DIR = '/perm/ecme4254/repos/nwp_notebooks/eerie/coupled_experiments/processed_data'
+BASE_OUTPUT_DIR = '/home/ecme4254/perm/repos/ace2_nemo_coupler/notebooks/processed_data'
 experiment_id = 'ace2_forced'
+
+if is_notebook():
+    debug=True
+else:
+    debug=False
 debug=False
 OUTPUT_DIR = os.path.join(BASE_OUTPUT_DIR, experiment_id)
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 # %%
-control_ds = xr.open_dataset("/home/ecme4254/hpcperm/model_runs/ace2/ace2_forced_control_70years/monthly_mean_predictions.nc")
-hist_ds = xr.open_dataset("/home/ecme4254/hpcperm/model_runs/ace2/ace2_forced_hist_70years/monthly_mean_predictions.nc")
-time_vals = pd.date_range(start="1951-01-01", end="2021-12-31", freq="MS")[: len(control_ds['time'])]
+input_folder_dict = {
+    'control': "/home/ecme4254/scratch/ace2_forcing_data/control_1951-2051/",
+    'historical': "/home/ecme4254/scratch/ace2_forcing_data/historical_1951-2021/"
+}
 
-control_ds = control_ds.assign_coords(time=time_vals)
-hist_ds = hist_ds.assign_coords(time=time_vals)
-
-# %%
-control_ds = control_ds.rename({k: v for k, v in ace2_var_lookup.items() if k in control_ds.variables}).rename({'lat': 'latitude', 'lon': 'longitude'})
-hist_ds = hist_ds.rename({k: v for k, v in ace2_var_lookup.items() if k in hist_ds.variables}).rename({'lat': 'latitude', 'lon': 'longitude'})
-
-control_sst_da = xr.open_mfdataset("/home/ecme4254/scratch/ace2_forcing_data/control_1951-2051/forcing_*.nc", combine="by_coords", preprocess=lambda x:x['surface_temperature'])['surface_temperature']
-hist_sst_da = xr.open_mfdataset("/home/ecme4254/scratch/ace2_forcing_data/historical_1951-2021/forcing_*.nc", combine="by_coords", preprocess=lambda x:x['surface_temperature'])['surface_temperature']
-
-control_sst_da = control_sst_da.isel(time=range(len(time_vals))).assign_coords(time=time_vals)
-hist_sst_da = hist_sst_da.isel(time=range(len(time_vals))).assign_coords(time=time_vals)
-
-control_ds['sea_surface_temperature'] = control_sst_da
-hist_ds['sea_surface_temperature'] = hist_sst_da
+experiment_path_dict = {
+    'control': "/home/ecme4254/hpcperm/model_runs/ace2/ace2_forced_control_70years/",
+    'historical': "/home/ecme4254/hpcperm/model_runs/ace2/ace2_forced_hist_70years/"
+}
 
 # %%
-control_ds = control_ds.isel(sample=0)
-hist_ds = hist_ds.isel(sample=0)
+experiment_ds_dict = {}
+for k in input_folder_dict:
+    
+    experiment_ds_dict[k] = xr.open_dataset(os.path.join(experiment_path_dict[k], "monthly_mean_predictions.nc"))
+
+    if debug:
+        experiment_ds_dict[k] = experiment_ds_dict[k].isel(time=slice(0, 12*5))
+        
+time_vals = pd.date_range(start="1951-01-01", end="2021-12-31", freq="MS")[: len(experiment_ds_dict['control']['time'])]
+years = sorted(set(time_vals.year))
+
+for k in input_folder_dict:
+    experiment_ds_dict[k] = experiment_ds_dict[k].assign_coords(time=time_vals)
+    experiment_ds_dict[k] = experiment_ds_dict[k].rename({varname: v for varname, v in ace2_var_lookup.items() if varname in experiment_ds_dict[k].variables}).rename({'lat': 'latitude', 'lon': 'longitude'}).isel(sample=0).drop_vars(['init_time', 'valid_time', 'counts'])
+
+
+# %%
+
+sst_da_dict = {}
+for k in experiment_path_dict:
+    print(f"Processing {k} run...")
+    
+    sst_da_dict[k] = []
+    fps = [os.path.join(input_folder_dict[k], f"forcing_{year}.nc") for year in years]
+    
+    for fp in tqdm(fps, desc="Processing ACE2 forced runs", total=len(fps)):
+        y = Path(fp).stem.split("_")[1]
+        
+        ds = xr.load_dataset(fp).resample(time='MS').mean()
+        
+        output_dir = os.path.join(experiment_path_dict[k], 'forcing_data')
+        os.makedirs(output_dir, exist_ok=True)
+        
+        # Save surface temperature data for later use in plotting and analysis
+        sst_da_dict[k].append(ds['surface_temperature'].assign_coords(latitude=experiment_ds_dict[k].latitude, longitude=experiment_ds_dict[k].longitude))
+
+    sst_da_dict[k] = xr.concat(sst_da_dict[k], dim='time')
+    experiment_ds_dict[k]['sea_surface_temperature'] = sst_da_dict[k]
 
 
 # %%
 def bjerknes_feedback_analysis(ds):
     
     enso_vars_ds = ds[['sea_surface_temperature', 
-                       '10m_u_component_of_wind']].copy()
+                       '10m_u_component_of_wind']].sel(longitude=slice(130, 250), latitude=slice(-15,15)).copy()
     
-    anomaly_ds = calculate_anomalies(enso_vars_ds).sel(longitude=slice(130, 250), latitude=slice(-15,15)).transpose('time', 'latitude', 'longitude')
+    anomaly_ds = calculate_anomalies(enso_vars_ds).transpose('time', 'latitude', 'longitude')
 
     for var in ['sea_surface_temperature']:
     
@@ -88,16 +121,15 @@ def bjerknes_feedback_analysis(ds):
 
 
 # %%
-ds_dict = {'control': control_ds, 'hist': hist_ds}
-for k, ds in ds_dict.items():
+for k, ds in experiment_ds_dict.items():
     ds.attrs['experiment_id'] = experiment_id
     results_dict, anomaly_ds = bjerknes_feedback_analysis(ds.copy())
             
     if not debug:
+        print(f"Saving zonal gradient and area average variables for {k} run...")   
         anomaly_ds[[v for v in anomaly_ds  if (v.endswith('gradient') or v.endswith('area_avg'))]].to_netcdf(os.path.join(OUTPUT_DIR, f'zonal_pacific_gradients.nc'))
 
     if not debug:
+        print(f"Saving Bjerknes feedback results for {k} run...")
         with open(os.path.join(OUTPUT_DIR, f'bjerknes_correlations_{k}.pkl'), 'wb+') as ofh:
             pickle.dump(results_dict, ofh)
-
-# %%
