@@ -883,24 +883,12 @@ if __name__ == "__main__":
     
     assert atmospheric_timestep_s % coupling_timestep_s == 0, "Atmospheric timestep must be a multiple of coupling timestep"
 
-    if args.atmosphere_source in ['ace2', 'ace2-calculated'] or args.atmosphere_gridfile is not None:
-        
-        grid = xr.load_dataset(args.atmosphere_gridfile)
-        lat_points = grid['latitude'].values
-        lon_points = grid['longitude'].values
-        n_lat_points = len(lat_points)
-        n_lon_points = len(lon_points)
-        n_points = n_lat_points*n_lon_points
-    else:
-        # Currently assuming the 1 degree GenCast model, which may change in the future
-        resolution = 1.0
-        grid=None
-        
-        lat_points=np.arange(-90, 90 + resolution, resolution)
-        lon_points=np.arange(0,360, resolution)   
-        n_lat_points = len(lat_points)
-        n_lon_points = len(lon_points)    
-        n_points = n_lat_points*n_lon_points
+    grid = xr.load_dataset(args.atmosphere_gridfile)
+    lat_points = grid['latitude'].values
+    lon_points = grid['longitude'].values
+    n_lat_points = len(lat_points)
+    n_lon_points = len(lon_points)
+    n_points = n_lat_points*n_lon_points
     
     logger.info('Reading namelist')
     namelist_dict = f90nml.read(os.path.join(args.model_directory, 'namelist_cfg'))

@@ -39,12 +39,12 @@ os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 # %%
 input_folder_dict = {
-    'control': "/home/ecme4254/scratch/ace2_forcing_data/control_1951-2051/",
+    'fixedCO2': "/home/ecme4254/scratch/ace2_forcing_data/fixedCO2_1951-2051",
     'historical': "/home/ecme4254/scratch/ace2_forcing_data/historical_1951-2021/"
 }
 
 experiment_path_dict = {
-    'control': "/home/ecme4254/hpcperm/model_runs/ace2/ace2_forced_control_70years/",
+    'fixedCO2': "/home/ecme4254/hpcperm/model_runs/ace2/ace2_forced_fixedCO2_70years/",
     'historical': "/home/ecme4254/hpcperm/model_runs/ace2/ace2_forced_hist_70years/"
 }
 
@@ -57,7 +57,7 @@ for k in input_folder_dict:
     if debug:
         experiment_ds_dict[k] = experiment_ds_dict[k].isel(time=slice(0, 12*5))
         
-time_vals = pd.date_range(start="1951-01-01", end="2021-12-31", freq="MS")[: len(experiment_ds_dict['control']['time'])]
+time_vals = pd.date_range(start="1951-01-01", end="2021-12-31", freq="MS")[: len(experiment_ds_dict['fixedCO2']['time'])]
 years = sorted(set(time_vals.year))
 
 for k in input_folder_dict:
