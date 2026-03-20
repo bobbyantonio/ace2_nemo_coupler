@@ -1,0 +1,33 @@
+# EC-Earth4 conda environment file for analysis
+#
+#
+# Sample usage:
+#
+# (1) Install environment in a local ".conda" directory
+# > conda env create --prefix .conda --file environment.yml
+# > conda activate ./.conda
+#
+# (2) Install environment with name "ece4-analysis"
+# > conda env create --name ece4-analysis --file environment.yml
+# > conda activate ece4-analysis
+
+name: ece4-analysis
+channels:
+  - conda-forge
+  - nodefaults
+dependencies:
+  - python=>3.10
+  - pip
+  - numpy
+  - pandas
+  - xarray
+  - netcdf4
+  - scipy
+  - xesmf>=0.7
+  - jupyter
+  - tqdm
+  - timezonefinder
+  - matplotlib
+  - cartopy
+  - pyaml
+  - jupytext

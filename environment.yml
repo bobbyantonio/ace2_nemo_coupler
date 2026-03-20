@@ -28,7 +28,7 @@ dependencies:
   - xarray
   - netcdf4
   - scipy
-  - xesmf
+  - xesmf>=0.7
   - jupyter
   - tqdm
   - timezonefinder
