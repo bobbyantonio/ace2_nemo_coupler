@@ -408,6 +408,12 @@ class FluxCalculator:
         # Remove fluxes from coastal ice areas, since they cause problems
         oasis_flux_ds = xr.where(land_mask, 0.0, oasis_flux_ds)
         oasis_flux_ds = xr.where(ice_mask, xr.where(filtered_land_mask>0, 0.0, oasis_flux_ds), oasis_flux_ds)
+        
+        # Cap the non-solar fluxes, since they teend to produce extreme values that cause problems with sea ice
+        # and sea surface height (also typically near the coast, think there can be problems caused by differences
+        # in land-sea mask)
+        oasis_flux_ds['A_Qns_oce'] = oasis_flux_ds['A_Qns_oce'].clip(-300,300)
+        oasis_flux_ds['A_Qns_ice'] = oasis_flux_ds['A_Qns_ice'].clip(-800,800)
 
         oasis_flux_ds = xr.where(land_mask, 0.0, oasis_flux_ds)
         
