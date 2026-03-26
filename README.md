@@ -83,11 +83,11 @@ jupytext --sync notebooks/*.py
 ```
 This will take the changes from the most recently updated ipynb / py file and copy those to the paired file. For this reason, the suggested workflow is to only edit notebooks, and when it is time to commit then run the sync command
 
-## Existing data from ACE2-NEMO runs
+## Existing raw data from ACE2-NEMO runs
 
 So far we have control and historical runs, both with 3 ensemble members each (created using a lagged ensemble)
 
-The control run data (mostly monthly but some daily data) are in these folders:
+The three ensemble members from the control run (mostly monthly but some daily data) are in these folders:
 ```
 /home/ecme4254/perm/old_model_runs/n3.6_ace2_1951_control_compressed_19510101-20210101_m0
 /home/ecme4254/perm/old_model_runs/n3.6_ace2_1951_control_compressed_19510101-20210101_m1
@@ -102,3 +102,26 @@ The historical run data (mostly monthly but some daily data) are in these folder
 /home/ecme4254/hpcperm/model_runs/n3.6_ace2_1951-2021_hist_compressed_19510101-20210101_m2
 ```
 
+## Processing the data for plotting
+
+Existing processed data can be found in the Zenodo repository https://zenodo.org/records/19187005.
+
+In order to process the ACE2-NEMO, EC-Earth3 and ERA5 data, there are python scripts in notebooks/ to do this; `notebooks/process_model_run.py` for the ACE2-NEMO runs, `notebooks/process_ece_data.py` for the EC-Earth3 data, and `notebooks\process_reanalysis.py` for the ERA5 reanalysis. 
+
+These scripts have been generated from Jupyter notebooks using jupytext (See above), so if you want to add extra analysis or debug the code, you can use e.g. `jupytext --sync notebooks/process_model_run.py` to create the notebook. Then once you have made changes to the notebook (taking care to delete any unnecessary cells), sync the changes back to the Python file using `jupytext --sync notebooks/process_model_run.py` again.
+
+There are slurm scripts created to run the processing for each data type: `slurm/run_coupled_processing.sh` for the ACE2-NEMO data, `slurm/run_coupled_ece3_processing.sh` for EC-Earth3 data, and `slurm/run_coupled_reanalysis_processing.sh` for ERA5 reanalysis.
+
+
+
+## Downloading EC-Earth3 data
+
+The EC-Earth data from the PRIMAVERA experiments is available from CEDA. There is a script to download this in `data_download/download_ece2_data.sh`.
+
+The historical data used in the ACE2-NEMO experiment was provided by colleagues from BSC, and can be made available on reasonable request.
+
+## ACE2 forcing and other data
+
+A bash script for downloading the ACE2 historical forcing data can be found at `data_download/download_ace2_forcing_data.sh`. In order to create the 'control' (constant 1950s) forcing, use the `notebooks/create_ace2_forcing_files.py` script (slurm script for this at `slurm/create_ace2_forcing_files.sh`).
+
+Grid files for ACE2 (required for the coupling and for plotting) can be found in the Zenodo repository https://zenodo.org/records/19187005
