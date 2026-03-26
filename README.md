@@ -44,8 +44,8 @@ nemo_version: 3.6
 atmosphere_source: ace2
 frequency: monthly
 atmosphere_model_dir: /home/ml_model_data/ace2
-config_file: /home/ace/configs/coupled_inference_config.yaml
-atmosphere_repo_dir: /perm/ecme4254/repos/ace
+config_file: /home/repos/ace/configs/coupled_inference_config.yaml
+atmosphere_repo_dir: /home/repos/ace
 era5_dir: /hpcperm/ecme4254/era5
 ece_script_dir: /perm/ecme4254/repos/ecearth4/scripts
 coupling_timestep_secs: 21600
