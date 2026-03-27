@@ -39,6 +39,8 @@ BK = [0.0, 0.0, 0.00537781, 0.0597284, 0.203491, 0.438391, 0.680643, 0.873929, 1
 
 OLEVEL_VALUES = [2.6676816940307617, 9.822750091552734, 22.75761604309082, 41.180023193359375, 61.11283874511719, 108.03028106689453, 163.16445922851562, 244.890625, 370.6884765625, 565.2922973632812, 773.3682861328125, 1045.854248046875, 1387.376953125, 1795.6707763671875, 2429.025146484375, 3138.56494140625, 4093.15869140625, 5089.478515625, 5902.0576171875]
 
+OLEVEL_BIN_EDGES = [0,100, 500, 1000, 2000,3500, 6000]
+
 def is_notebook() -> bool:
     try:
         shell = get_ipython().__class__.__name__
@@ -251,7 +253,13 @@ def load_era5_monthly(var, era5_dir, years):
     era5_da = convert_dts_to_first_of_month(era5_da)
     return era5_da
 
-def load_nemo_ds_subset(base_dir, glob_filename, vars_to_select, level_values, concat_dim='time', decode_times=True):
+def load_nemo_ds_subset(base_dir, 
+                        glob_filename, 
+                        vars_to_select, 
+                        level_values=None, 
+                        concat_dim='time',
+                        groupby_bins=False,
+                        decode_times=True):
     fps = glob(os.path.join(base_dir, glob_filename))
     ds = []
     for fp in sorted(fps):
@@ -263,8 +271,13 @@ def load_nemo_ds_subset(base_dir, glob_filename, vars_to_select, level_values, c
         tmp_ds = tmp_ds.assign_coords({'time_counter': [dt]})
         tmp_ds = tmp_ds.rename({'time_counter': 'time'}).drop_vars('time_centered')
 
-        if 'toce_pot' in vars_to_select:
-            tmp_ds = tmp_ds.sel(olevel=level_values)
+        if 'olevel' in tmp_ds.dims and level_values is not None:
+            if groupby_bins:
+                bin_edges = sorted(level_values)
+                bin_labels = [f'{bin_edges[n]}-{bin_edges[n+1]}' for n in range(len(bin_edges)-1)]
+                tmp_ds = tmp_ds.groupby_bins(group='olevel', bins=bin_edges, right=True, labels=bin_labels).mean()
+            else:
+                tmp_ds = tmp_ds.sel(olevel=level_values)
         ds.append(tmp_ds)
         tmp_ds.close()
         del tmp_ds
@@ -357,16 +370,16 @@ def calculate_nino_index(input_sst_da,
     sst_da = input_sst_da.copy()
 
     if nino_region == 3.4:
-        min_lat=190
-        max_lat =240
+        min_lon=190
+        max_lon =240
     elif nino_region == 3:
-        min_lat=210
-        max_lat =270
+        min_lon=210
+        max_lon =270
     elif nino_region == 4:
-        min_lat = 160
-        max_lat = 210
+        min_lon = 160
+        max_lon = 210
         
-    sst_da = sst_da.sel(latitude=slice(-5,5 + resolution), longitude=slice(min_lat, max_lat+resolution))
+    sst_da = sst_da.sel(latitude=slice(-5,5 + resolution), longitude=slice(min_lon, max_lon+resolution))
 
     if remove_seasonal_cycle:
         sst_da['month'] = sst_da['time.month']

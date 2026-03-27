@@ -412,10 +412,15 @@ class FluxCalculator:
         # Cap the non-solar fluxes, since they teend to produce extreme values that cause problems with sea ice
         # and sea surface height (also typically near the coast, think there can be problems caused by differences
         # in land-sea mask)
-        oasis_flux_ds['A_Qns_oce'] = oasis_flux_ds['A_Qns_oce'].clip(-300,300)
-        oasis_flux_ds['A_Qns_ice'] = oasis_flux_ds['A_Qns_ice'].clip(-800,800)
-
-        oasis_flux_ds = xr.where(land_mask, 0.0, oasis_flux_ds)
+        # oasis_flux_ds['A_Qns_oce'] = xr.where(ice_mask, oasis_flux_ds['A_Qns_oce'].clip(-400,400), oasis_flux_ds['A_Qns_oce'])
+        # oasis_flux_ds['A_Qns_ice'] = xr.where(ice_mask, oasis_flux_ds['A_Qns_ice'].clip(-800,800), oasis_flux_ds['A_Qns_oce'])
+        
+        # Also extend coastal masking to Antarctica and Arctic circle, even if there isn't sea ice there.
+        # Since otherwise there are extreme fluxes that cause problems
+        south_pole_mask = oasis_flux_ds['latitude'] < -60
+        arctic_circle_mask = oasis_flux_ds['latitude'] > 66
+        oasis_flux_ds = xr.where(np.logical_and(filtered_land_mask>0, south_pole_mask), 0.0, oasis_flux_ds)
+        oasis_flux_ds = xr.where(np.logical_and(filtered_land_mask>0, arctic_circle_mask), 0.0, oasis_flux_ds)
         
         # Important to have no null values
         # Note that sometimes there are null values remaining over Antarctica, hence we fill those with the mean.

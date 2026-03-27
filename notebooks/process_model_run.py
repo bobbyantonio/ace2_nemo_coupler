@@ -14,28 +14,16 @@
 
 # %%
 import os, sys
-import gc
-import subprocess
-import string
 import pickle
 import datetime
-from tqdm import tqdm
 import numpy as np
 import xarray as xr
 from argparse import ArgumentParser
 
 # %%
 import pandas as pd
-import matplotlib.pyplot as plt
-from glob import glob
-from pathlib import Path
-from matplotlib import gridspec
-import cartopy.crs as ccrs
 import calendar
 from itertools import chain
-import cartopy.mpl.ticker as cticker
-from scipy import signal
-from scipy.stats import t
 
 # %%
 # python_path = sys.executable
@@ -49,18 +37,18 @@ sys.path.append("/home/ecme4254/perm/repos/ace2_nemo_coupler")
 from notebooks.coupling_processing_utils import detrend_dataarray, \
     convert_dts_to_first_of_month, calculate_en34 ,calculate_linear_relationship, \
     mean_areas, calculate_en34_spectra, vertical_integral, load_ds_subset, load_nemo_ds_subset,\
-    calculate_correlation, OLEVEL_VALUES, calculate_lagged_correlations, calculate_anomalies, \
+    calculate_correlation, OLEVEL_VALUES, OLEVEL_BIN_EDGES, calculate_lagged_correlations, calculate_anomalies, \
     bjerknes_feedback_analysis, calculate_nino_index, ace2_var_lookup, is_notebook
 
 BASE_OUTPUT_DIR = '/home/ecme4254/perm/repos/ace2_nemo_coupler/notebooks/processed_data'
 
 # %%
 if is_notebook():
-    experiment_id = 'n3.6_ace2_1951_control_compressed_19510101-20210101'
-    ensemble_members = [0,2]
-    glob_str = '1960*'
-    model_run_dir='/home/ecme4254/perm/old_model_runs'
-    # model_run_dir ='/home/ecme4254/hpcperm/model_runs'
+    experiment_id = 'n3.6_ace2_1951_spinupCMIP6_19510101-20210101'
+    ensemble_members = [0]
+    glob_str = '20*'
+    # model_run_dir='/home/ecme4254/perm/old_model_runs'
+    model_run_dir ='/home/ecme4254/hpcperm/model_runs'
 
     components = ''
     month_lag_max = 1
@@ -140,43 +128,11 @@ print('Loading atm2oce data', flush=True)
 atm2oce_ds = xr.concat([load_ds_subset(f'{base_dir}_m{n}', f'atm2oce_MS_{model_name}_nemo_{glob_str}.nc', atm2oce_vars).expand_dims({'member': [n]}) for n in ensemble_members], dim='member')
 
 # %%
-# print('Loading oce2atm data', flush=True)
-# oce2atm_ds = xr.concat([load_ds_subset(f'{base_dir}_m{n}', f'oce2atm_MS_{model_name}_nemo_{glob_str}.nc', ['sea_surface_temperature']).expand_dims({'member': [n]}) for n in ensemble_members], dim='member')
-# oce2atm_ds.to_netcdf("ACE2-NEMO-control_SST.nc")
-
-# %%
-# ace2_var_lookup = {'UGRD10m': '10m_u_component_of_wind'}
-    
-# atmosphere_monthly_ds = xr.concat([load_ds_subset(f'{base_dir}_m{n}', f'{model_name}_MS_{model_name}_nemo_{glob_str}.nc', ace2_var_lookup.keys()).expand_dims({'member': [n]}) for n in ensemble_members], dim='member')
-# atmosphere_monthly_ds = atmosphere_monthly_ds.rename(ace2_var_lookup)
-
-# atmosphere_monthly_ds.to_netcdf("ACE2-NEMO-control_10mU.nc")
-
-# %%
-# print('Loading oce2atm data', flush=True)
-# oce2atm_ds = xr.concat([load_ds_subset(f'{base_dir}_m{n}', f'oce2atm_MS_{model_name}_nemo_{glob_str}.nc', ['sea_surface_temperature']).expand_dims({'member': [n]}) for n in ensemble_members], dim='member')
-# sea_mask = ~np.isnan(oce2atm_ds['sea_surface_temperature'].isel(time=0, member=0))
-
-# %%
 print('Loading oce2atm data', flush=True)
 
 oce2atm_ds = xr.concat([load_ds_subset(f'{base_dir}_m{n}', f'oce2atm_MS_{model_name}_nemo_{glob_str}.nc', oce2atm_vars).expand_dims({'member': [n]}) for n in ensemble_members], dim='member')
 sea_mask = ~np.isnan(oce2atm_ds['sea_surface_temperature'].isel(time=0, member=0))
-ice_mask_t = (oce2atm_ds['sea_ice_fraction'] > 0.15).sortby('time')
-ice_mask = oce2atm_ds['sea_ice_fraction'].mean('time') > 0.15
 
-# %%
-ice_mask_t = (oce2atm_ds['sea_ice_fraction'] > 0.05).sortby('time')
-ice_mask = oce2atm_ds['sea_ice_fraction'].mean('time') > 0.05
-
-# %%
-# print('Loading atmosphere data', flush=True)
-# ace2_var_lookup = {
-#                    'TMP2m': '2m_temperature',
-#                     'UGRD10m': '10m_u_component_of_wind',
-#                    }
-# atmosphere_monthly_ds = xr.concat([load_ds_subset(f'{base_dir}_m{n}', f'{model_name}_MS_{model_name}_nemo_{glob_str}.nc', ace2_var_lookup.keys()).expand_dims({'member': [n]}) for n in ensemble_members], dim='member')
-# atmosphere_monthly_ds = atmosphere_monthly_ds.rename(ace2_var_lookup)
 
 # %%
 print('Loading atmosphere data', flush=True)
@@ -228,6 +184,7 @@ for grid_string, grid_vars in nemo_vars_dict.items():
         tmp_ds = load_nemo_ds_subset(f'{base_dir}_m{n}', f'nemo_output_{model_name}/nemo_ocean_output_grid_{grid_string}_{glob_str}-{glob_str}.nc', 
                                                                vars_to_select=grid_vars, 
                                                                level_values=OLEVEL_VALUES, 
+                                                               groupby_bins=True,
                                                                decode_times=False, 
                                                                concat_dim='time').expand_dims({'member': [n]})
         nemo_ds_dict[grid_string].append(tmp_ds)
@@ -283,37 +240,56 @@ experiment_ds['mean_surface_latent_heat_flux_raw'] = experiment_ds['mean_surface
 experiment_ds['mean_surface_net_short_wave_radiation_flux_raw'] = experiment_ds['mean_surface_net_short_wave_radiation_flux'].copy()
 experiment_ds['mean_surface_net_long_wave_radiation_flux_raw'] = experiment_ds['mean_surface_net_long_wave_radiation_flux'].copy()
 
-experiment_ds['mean_surface_sensible_heat_flux'] = xr.where(ice_mask_t, experiment_ds['sensible_heat_flux_ice'], experiment_ds['mean_surface_sensible_heat_flux'])
-experiment_ds['mean_surface_latent_heat_flux'] = xr.where(ice_mask_t, experiment_ds['latent_heat_flux_ice'], experiment_ds['mean_surface_latent_heat_flux'])
-experiment_ds['mean_surface_net_short_wave_radiation_flux'] = xr.where(ice_mask_t,  experiment_ds['solar_flux_over_ice'], experiment_ds['mean_surface_net_short_wave_radiation_flux'])
-experiment_ds['mean_surface_net_long_wave_radiation_flux'] = xr.where(ice_mask_t,  experiment_ds['net_long_wave_radiation_flux_ice'],  experiment_ds['mean_surface_net_long_wave_radiation_flux'])
+
 
 # %%
-# Fluxes over ocean points only
-for var in ['mean_surface_sensible_heat_flux', 
-            'mean_surface_latent_heat_flux', 
-            'mean_surface_net_short_wave_radiation_flux', 
-            'mean_surface_downward_short_wave_radiation_flux',
-            'mean_surface_upward_short_wave_radiation_flux', 
-            'mean_surface_net_long_wave_radiation_flux',
-            'mean_surface_downward_long_wave_radiation_flux',
-            'mean_surface_upward_long_wave_radiation_flux'
-           ]:
-    experiment_ds[var] = xr.where(sea_mask, experiment_ds[var], np.nan)
-    experiment_ds[f'{var}_oce'] = xr.where(ice_mask, np.nan, experiment_ds[var])
+# Create ice mask, and account for missing dates
 
+ice_mask = oce2atm_ds['sea_ice_fraction'].mean('time') > 0.15
+ice_mask_t = xr.merge([oce2atm_ds['sea_ice_fraction'], experiment_ds['sensible_heat_flux_ice']], join='outer')['sea_ice_fraction']
+missing_ice_mask_t_values = list(set(experiment_ds['time'].values).difference(set(oce2atm_ds['time'].values)))
+
+for t_val in missing_ice_mask_t_values:
+    missing_dt = pd.Timestamp(t_val)
+    if missing_dt == experiment_ds['time'].values.max():
+        ice_mask_t.loc[{'time': missing_dt}] = ice_mask_t.sel(time=missing_dt - pd.DateOffset(months=1))
+    else:
+        ice_mask_t.loc[{'time': missing_dt}] = ice_mask_t.sel(time=missing_dt + pd.DateOffset(months=1))
+
+# %%
+try:
+    experiment_ds['mean_surface_sensible_heat_flux'] = xr.where(ice_mask_t, experiment_ds['sensible_heat_flux_ice'], experiment_ds['mean_surface_sensible_heat_flux'])
+    experiment_ds['mean_surface_latent_heat_flux'] = xr.where(ice_mask_t, experiment_ds['latent_heat_flux_ice'], experiment_ds['mean_surface_latent_heat_flux'])
+    experiment_ds['mean_surface_net_short_wave_radiation_flux'] = xr.where(ice_mask_t,  experiment_ds['solar_flux_over_ice'], experiment_ds['mean_surface_net_short_wave_radiation_flux'])
+    experiment_ds['mean_surface_net_long_wave_radiation_flux'] = xr.where(ice_mask_t,  experiment_ds['net_long_wave_radiation_flux_ice'],  experiment_ds['mean_surface_net_long_wave_radiation_flux'])
+
+    # Fluxes over ocean points only
+    for var in ['mean_surface_sensible_heat_flux', 
+                'mean_surface_latent_heat_flux', 
+                'mean_surface_net_short_wave_radiation_flux', 
+                'mean_surface_downward_short_wave_radiation_flux',
+                'mean_surface_upward_short_wave_radiation_flux', 
+                'mean_surface_net_long_wave_radiation_flux',
+                'mean_surface_downward_long_wave_radiation_flux',
+                'mean_surface_upward_long_wave_radiation_flux'
+               ]:
+        experiment_ds[var] = xr.where(sea_mask, experiment_ds[var], np.nan)
+        experiment_ds[f'{var}_oce'] = xr.where(ice_mask, np.nan, experiment_ds[var])
     
-    experiment_ds[f'{var}_ice'] = xr.where(ice_mask, experiment_ds[var], np.nan)
-
-# %%
-for suffix in ['', '_oce', '_ice']:
-    experiment_ds[f'mean_surface_heat_flux{suffix}'] = experiment_ds[f'mean_surface_sensible_heat_flux{suffix}'] + experiment_ds[f'mean_surface_latent_heat_flux{suffix}']
-    experiment_ds[f'albedo{suffix}'] = experiment_ds[f'mean_surface_upward_short_wave_radiation_flux{suffix}'] / experiment_ds[f'mean_surface_downward_short_wave_radiation_flux{suffix}']
-
-    experiment_ds[f'albedo{suffix}'] = xr.where(experiment_ds[f'mean_surface_downward_short_wave_radiation_flux{suffix}'] == 0.0, 1.0, experiment_ds[f'albedo{suffix}'])
-
-    experiment_ds[f'non_solar_heat_flux{suffix}'] = experiment_ds[f'mean_surface_sensible_heat_flux{suffix}']  + experiment_ds[f'mean_surface_latent_heat_flux{suffix}'] + experiment_ds[f'mean_surface_net_long_wave_radiation_flux{suffix}']
-    experiment_ds[f'total_heat_flux{suffix}'] = experiment_ds[f'non_solar_heat_flux{suffix}'] + experiment_ds[f'mean_surface_net_short_wave_radiation_flux{suffix}']
+        
+        experiment_ds[f'{var}_ice'] = xr.where(ice_mask, experiment_ds[var], np.nan)
+        
+    for suffix in ['', '_oce', '_ice']:
+        experiment_ds[f'mean_surface_heat_flux{suffix}'] = experiment_ds[f'mean_surface_sensible_heat_flux{suffix}'] + experiment_ds[f'mean_surface_latent_heat_flux{suffix}']
+        experiment_ds[f'albedo{suffix}'] = experiment_ds[f'mean_surface_upward_short_wave_radiation_flux{suffix}'] / experiment_ds[f'mean_surface_downward_short_wave_radiation_flux{suffix}']
+    
+        experiment_ds[f'albedo{suffix}'] = xr.where(experiment_ds[f'mean_surface_downward_short_wave_radiation_flux{suffix}'] == 0.0, 1.0, experiment_ds[f'albedo{suffix}'])
+    
+        experiment_ds[f'non_solar_heat_flux{suffix}'] = experiment_ds[f'mean_surface_sensible_heat_flux{suffix}']  + experiment_ds[f'mean_surface_latent_heat_flux{suffix}'] + experiment_ds[f'mean_surface_net_long_wave_radiation_flux{suffix}']
+        experiment_ds[f'total_heat_flux{suffix}'] = experiment_ds[f'non_solar_heat_flux{suffix}'] + experiment_ds[f'mean_surface_net_short_wave_radiation_flux{suffix}']
+except Exception as e:
+    print('********* Problem with flux processing')
+    print(e)
 
 
 # %%
@@ -327,68 +303,6 @@ experiment_ds['surface_temperature_difference'] = experiment_ds['2m_temperature'
 # Weights for calculating global averages
 weights = np.cos(np.deg2rad(atmosphere_monthly_ds.latitude))
 weights = weights / weights.sum().item()
-
-# %% [markdown]
-# ### Calculate all heat fluxes
-
-# %%
-# Load the runoff
-runoff_da = xr.load_dataset("/home/ecme4254/perm/ece3data/nemo/climatology/runoff-icb_DaiTrenberth_Depoorter_ORCA1_JD.nc")['sorunoff'].rename({'nav_lat': 'latitude', 'nav_lon': 'longitude'})
-runoff_da = xr.concat([runoff_da.sel(time_counter=dt.month).expand_dims({'time':[dt]}) for dt in time_vals], dim='time').reset_coords('time_counter', drop=True)
-
-
-# %%
-rnf_regridder = xe.Regridder(runoff_da.isel(time=0), 
-                         atmosphere_monthly_ds.isel(member=0,time=0)['2m_temperature'], 
-                         'bilinear',
-                         ignore_degenerate=True, 
-                         reuse_weights=False, 
-                         periodic=True, 
-                         filename=f'runoff_weights.nc')
-
-# %%
-runoff_da = rnf_regridder(runoff_da)
-experiment_ds['runoff'] = xr.where(sea_mask, runoff_da, np.nan)
-
-# %%
-# Heat correction due to fwb conservation
-# from sbcfwb.f90
-
-freshwater_flux = experiment_ds['evaporation'] - experiment_ds['liquid_precipitation'] - experiment_ds['solid_precipitation'] - experiment_ds['runoff']
-mean_empr = (freshwater_flux).weighted(weights).mean(['latitude', 'longitude'])
-
-experiment_ds['fwf_heat_correction'] = mean_empr * 4186* (experiment_ds['2m_temperature'] - experiment_ds['sea_surface_temperature'])
-
-# Heat change due to excess evaporation
-experiment_ds['fwf_heat_correction'] = xr.where(experiment_ds['fwf_heat_correction'] > 0, mean_empr* (experiment_ds['sea_surface_temperature'] - experiment_ds['2m_temperature']) * 4000, experiment_ds['fwf_heat_correction'])
-experiment_ds['fwf_heat_correction_oce'] = xr.where(~ice_mask, experiment_ds['fwf_heat_correction'],np.nan)
-
-# %%
-# rt0      = 273.15_wp 
-# rcp = 3991.86795711963_wp !: heat capacity [J/K]
-# rn_pfac     = 1.        !  multiplicative factor for precipitation (total & snow)
-# rn_efac     = 1.        !  multiplicative factor for evaporation (0. or 1.)
-           
- # qns(:,:) = zqlw(:,:) - zqsb(:,:) - zqla(:,:)                                &   ! Downward Non Solar 
- #         &     - sf(jp_snow)%fnow(:,:,1) * rn_pfac * lfus                         &   ! remove latent melting heat for solid precip
- #         &     - zevap(:,:) * pst(:,:) * rcp                                      &   ! remove evap heat content at SST
- #         &     + ( sf(jp_prec)%fnow(:,:,1) - sf(jp_snow)%fnow(:,:,1) ) * rn_pfac  &   ! add liquid precip heat content at Tair
- #         &     * ( sf(jp_tair)%fnow(:,:,1) - rt0 ) * rcp                          &
- #         &     + sf(jp_snow)%fnow(:,:,1) * rn_pfac                                &   ! add solid  precip heat content at min(Tair,Tsnow)
- #         &     * ( MIN( sf(jp_tair)%fnow(:,:,1), rt0_snow ) - rt0 ) * cpic
- #      qns(:,:) = qns(:,:) * tmask(:,:,1)
-
-# precip [kg / m^2 / s] * Area [m^2]
-# Heat added due to rainwater
-experiment_ds['heat_flux_liquid_precip'] = experiment_ds['liquid_precipitation'] * 4186* (experiment_ds['2m_temperature'] - experiment_ds['sea_surface_temperature'])
-
-# Heat added due to snow, Assuming snow is 0K
-experiment_ds['heat_flux_solid_precip'] = experiment_ds['solid_precipitation'] * 2100 * (0 - experiment_ds['sea_surface_temperature'])
-
-# Evaporative heat content at sea surface temperature. Note that this is relative to the reference temperature, this seems to be the correct way to define it.
-experiment_ds['evaporation_heat_content'] =  experiment_ds['evaporation'] * (experiment_ds['sea_surface_temperature'] - experiment_ds['2m_temperature']) * 4000
-
-# Note: these are all negative (i.e. sources of further cooling)
 
 # %% [markdown]
 # ## Bjerknes feedback
@@ -486,6 +400,26 @@ if not debug:
     with open(os.path.join(OUTPUT_DIR, f'mean_dict.pkl'), 'wb+') as ofh:
         pickle.dump(mean_dict, ofh)
 
+# %%
+
+for m in ensemble_members:
+    ace2_nemo_time_series = mean_dict['Global']['mean']['sea_surface_temperature'].sel(member=m).groupby('time.year').mean()
+
+    percentile_25th = ace2_nemo_time_series.quantile(0.25).item()
+    percentile_75th = ace2_nemo_time_series.quantile(0.75).item()
+    
+    upper_quartile_data = xr.where(ace2_nemo_time_series > percentile_75th, ace2_nemo_time_series, np.nan).dropna('year')
+    lower_quartile_data = xr.where(ace2_nemo_time_series < percentile_25th, ace2_nemo_time_series, np.nan).dropna('year')
+    
+    upper_quartile_mean = experiment_ds['sea_surface_temperature'].sel(member=m).sel(time=[dt for dt in time_vals if dt.year in upper_quartile_data['year'].values]).mean('time')
+    lower_quartile_mean = experiment_ds['sea_surface_temperature'].sel(member=m).sel(time=[dt for dt in time_vals if dt.year in lower_quartile_data['year'].values]).mean('time')
+    
+    if not debug:
+        upper_quartile_mean.to_netcdf(os.path.join(OUTPUT_DIR, f'upper_quartile_mean_sst_m{m}.nc'))
+        lower_quartile_mean.to_netcdf(os.path.join(OUTPUT_DIR, f'lower_quartile_mean_sst_m{m}.nc'))
+
+
+
 # %% [markdown]
 # ## Map of trends
 
@@ -521,6 +455,8 @@ drift_vars = ['sea_surface_temperature', 'sea_ice_thickness', 'sea_ice_fraction'
 
 trends_time_range_dict = {'Pre-1980': [dt for dt in time_vals if dt.year <=1980],
                            'Post-1980': [dt for dt in time_vals if dt.year> 1980],
+                           'Last 50 Years': time_vals[-600:],
+                           'First 50 Years': time_vals[:600]
                            'All': time_vals}
 
 trends_dict = {}
@@ -535,6 +471,39 @@ for name, tvals in time_range_dict.items():
 if not debug:
     with open(os.path.join(OUTPUT_DIR, f'trends_dict.pkl'), 'wb+') as ofh:
         pickle.dump(trends_dict, ofh)
+
+# %%
+ocean_drift_var= 'sea_water_potential_temperature'
+
+if ocean_drift_var in ece3_ds.data_vars:
+    toce_trends_dict = {}
+    toce_latitude_trends_dict = {}
+
+    for name, tvals in time_range_dict.items():
+        toce_trends_dict[name] = {}
+        toce_latitude_trends_dict[name] = {}
+        
+        if len(tvals)>0:
+            _, polyfit_ece3 = detrend_dataarray(experiment_ds[ocean_drift_var].isel(member=0).sel(time=tvals).groupby('time.year').mean().sel(latitude=0, method='nearest').sel(longitude=slice(130,260)), 'year')
+            toce_trends_dict[name] = polyfit_ece3
+            # Aggregation by latitude
+            _, polyfit = detrend_dataarray(experiment_ds[ocean_drift_var].isel(member=0).sel(time=tvals).groupby(['time.year']).mean().mean('longitude'), 'year')
+            toce_latitude_trends_dict[name] = polyfit
+# if not debug:
+#     print(f'Saving Ocean drift data to {OUTPUT_DIR}')
+#     polyfit_ece3.to_netcdf(os.path.join(OUTPUT_DIR, 'polyfit_toce_ece3.nc'))
+
+# if not debug:
+#     print(f'Saving Ocean drift data to {OUTPUT_DIR}')
+#     polyfit.to_netcdf(os.path.join(OUTPUT_DIR, 'polyfit_toce_latitude.nc' ))
+if not debug:
+    print(f'Saving Ocean drift data to {OUTPUT_DIR}')
+    with open(os.path.join(OUTPUT_DIR, f'polyfit_toce_ece3_dict.pkl'), 'wb+') as ofh:
+        pickle.dump(toce_trends_dict, ofh)
+if not debug:
+    print(f'Saving Ocean drift data to {OUTPUT_DIR}')
+    with open(os.path.join(OUTPUT_DIR, f'polyfit_toce_latitude_dict.pkl'), 'wb+') as ofh:
+        pickle.dump(toce_latitude_trends_dict, ofh)
 
 # %% [markdown]
 # ## ENSO analysis
