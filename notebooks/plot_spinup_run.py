@@ -97,7 +97,8 @@ name_lookup = {
                 'instantaneous_northward_turbulent_surface_stress': {'name': 'Northward wind stress', 'units': '$Nm^{-2}$'},
                 'total_heat_flux': {'name': 'Total heat flux', 'units': '$Wm^{-2}$', 'abbrev': 'Total HF'},
                'total_heat_flux_oce': {'name': 'Total heat flux (ocean)', 'units': '$Wm^{-2}$', 'abbrev': 'Total HF (oce)'},
-               'mean_surface_heat_flux': {'name': 'Latent + sensible heat flux', 'units': '$Wm^{-2}$', 'abbrev': 'LHF + SHF'}
+               'mean_surface_heat_flux': {'name': 'Latent + sensible heat flux', 'units': '$Wm^{-2}$', 'abbrev': 'LHF + SHF'},
+                'sea_surface_salinity': {'name': 'Sea surface salinity', 'units': r'$10^{-3} ppt$', 'abbrev': 'SSS'}
 }
 
 # %% [markdown]
@@ -109,9 +110,9 @@ with open(os.path.join(ece3_spinup_dir, f'mean_dict.pkl'), 'rb') as ifh:
 
 # %%
 vars_to_plot = [
-                'sea_surface_temperature',  'sea_ice_volume', '2m_temperature_sea_points']
+                'sea_surface_temperature',  'sea_ice_volume', '2m_temperature_sea_points', 'sea_surface_salinity']
 area_name = 'Global'
-ncols=3
+ncols=2
 nrows = int(np.ceil(len(vars_to_plot)/ncols))
 
 fig, axs = plt.subplots(nrows, ncols, figsize=(ncols*6, 4*nrows))
@@ -133,19 +134,19 @@ for n, var in enumerate(vars_to_plot):
         aggregation='mean'
     ece_time_series = ece_spinup_mean_dict[area_name][aggregation][var].groupby('time.year').mean()
         
-    h = (ece_time_series ).plot(ax=axs[col], label=label)    
+    h = (ece_time_series ).plot(ax=axs[row,col], label=label)    
 
     if n ==0:
         handles.append(h[0])
         labels.append(label)
 
-    axs[col].set_title(f"{var}")
-    axs[col].set_ylabel(f"{name_lookup[var]['abbrev']} [{name_lookup[var]['units']}]")
-    axs[col].set_title(f"({string.ascii_lowercase[n]}) {name_lookup[var]['name']}")
-    axs[col].set_xlabel('Time')
+    axs[row,col].set_title(f"{var}")
+    axs[row,col].set_ylabel(f"{name_lookup[var]['abbrev']} [{name_lookup[var]['units']}]")
+    axs[row,col].set_title(f"({string.ascii_lowercase[n]}) {name_lookup[var]['name']}")
+    axs[row,col].set_xlabel('Time')
 
 fig.subplots_adjust(bottom=0.3, wspace=0.33)
-axs[-1].legend(handles = handles , labels=labels,loc='upper center', 
+axs[-1,-1].legend(handles = handles , labels=labels,loc='upper center', 
              bbox_to_anchor=(-0.3, -0.2),fancybox=False, shadow=False, ncol=4)
 
 
@@ -153,6 +154,47 @@ axs[-1].legend(handles = handles , labels=labels,loc='upper center',
 # # Global averages of temperatures at depth
 
 # %%
-ece_spinup_mean_dict
+thetao_da = ece_spinup_mean_dict['Global']['mean']['sea_water_potential_temperature']
+
+fig, ax = plt.subplots()
+for lb in thetao_da['lev_bins'].values:
+    tmp_da = thetao_da.sel(lev_bins=lb)
+    tmp_da = (tmp_da -tmp_da.isel(time=0))/ tmp_da.std('time')
+    tmp_da.plot(ax=ax, label=lb + ' m')
+plt.legend()
+ax.set_title('Change in potential temperature (standardised)')
+ax.set_ylabel(r'$(\theta-\theta_{t=0})/s_\theta$')
+ax.set_xlabel('Time')
+
+# %% [markdown]
+# # Maps of surface trends
 
 # %%
+mpl.style.use('default')
+drift_vars = ['sea_surface_temperature',  'sea_surface_height']
+da_grid = [ [xr.load_dataset(os.path.join(ace2_nemo_control_dir, f'polyfit_{varname}.nc' ))['polyfit_coefficients'].sel(degree=1).transpose('latitude', 'longitude'),
+             xr.load_dataset(os.path.join(ece_control_dir, f'polyfit_{varname}_ece3.nc' ))['polyfit_coefficients'].sel(degree=1).transpose('latitude', 'longitude')] for varname in drift_vars]
+num_cols = 2
+num_rows = 4
+cbar_labels= [f"{name_lookup[varname]['name']} trend [{name_lookup[varname]['units']}/year]" for varname in drift_vars]
+titles_grid = [['a) ACE2-NEMO-control', 'b) ECE3P-control'], 
+               ['c) ACE2-NEMO-control', 'd) ECE3P-control']]
+# vmax_vals = [mean_state_range_dict.get(varname, {}).get('vmax', None) for varname in drift_vars]
+# vmin_vals = [mean_state_range_dict.get(varname, {}).get('vmin', None) for varname in drift_vars]
+vmax_vals = [0.05, 0.01]
+vmin_vals = [-1*item for item in vmax_vals]
+cmaps = ['RdBu_r']*2
+
+plot_map_grid_cbar_by_row(da_grid,
+                                cbar_labels,
+                                titles_grid ,
+                                vmax_vals,
+                                vmin_vals,
+                                  projection=ccrs.Robinson(central_longitude=180),
+                                  cmaps=cmaps,
+                                width_height_ratio = [8,6],
+                                shrink_factor= 0.7,
+                                wspace=0.001,
+                                cbar_height_ratio=0.02,
+                                )
+plt.savefig(os.path.join(MANUSCRIPT_FIGURE_DIR, f'surface_drifts.pdf'), format='pdf')
