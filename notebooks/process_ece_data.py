@@ -5,7 +5,7 @@
 #       extension: .py
 #       format_name: percent
 #       format_version: '1.3'
-#       jupytext_version: 1.17.1
+#       jupytext_version: 1.19.1
 #   kernelspec:
 #     display_name: ece4
 #     language: python
@@ -35,19 +35,20 @@ import calendar
 from itertools import chain
 import cartopy.mpl.ticker as cticker
 from scipy import signal
+import xesmf as xe
 
+HOME = Path(os.getcwd()).parents[1]
 # python_path = sys.executable
 # esmkfile_path = python_path.replace('bin/python', 'lib/esmf.mk')
 # os.environ['ESMFMKFILE'] = esmkfile_path
 
 # %%
-import xesmf as xe
-
-sys.path.append('/home/users/bantonio/repos/ace2_nemo_coupler')
+# Add this repo to the path, to enable using all of the helper functions
+sys.path.append(str(HOME / 'ace2_nemo_coupler'))
 
 from notebooks.coupling_processing_utils import detrend_dataarray, \
     load_ece3_data, convert_dts_to_first_of_month, calculate_en34, calculate_linear_relationship, \
-    mean_areas, calculate_en34_spectra, calculate_correlation, OLEVEL_VALUES, calculate_lagged_correlations, calculate_anomalies, \
+    calculate_en34_spectra, calculate_correlation, OLEVEL_VALUES, OLEVEL_BIN_EDGES, calculate_lagged_correlations, calculate_anomalies, \
     bjerknes_feedback_analysis, calculate_nino_index, is_notebook
 # from notebook_utils.plotting import plot_grid_shared_axes
 
@@ -71,12 +72,15 @@ ece3_var_lookup = {"tas": "2m_temperature",
                    "vo": "ssv",
                    "uas": "10m_u_component_of_wind",
                    "vas": "10m_v_component_of_wind",
-                   'psl': 'surface_pressure'
+                   'psl': 'surface_pressure',
+                   'so': 'salinity',
+                   'sos': 'sea_surface_salinity',
+                   'zostoga' : 'thermosteric_sea_level_change'
                   }
 
-all_ocean_t_vars = ['tos', 'siconc', 'thetao', 'sithick', 'zos', 'mlotst', 'thetao']
-all_ocean_u_vars = ['uo']
-all_ocean_v_vars = ['vo']
+all_ocean_t_vars = ['tos', 'siconc', 'thetao', 'sithick', 'zos', 'zostoga', 'mlotst', 'thetao', 'thkcello', 'so', 'sos']
+all_ocean_u_vars = ['uo', 'uas']
+all_ocean_v_vars = ['vo', 'vas']
 all_ocean_vars = all_ocean_t_vars + all_ocean_u_vars + all_ocean_v_vars
 
 
@@ -86,26 +90,45 @@ DEFAULT_ANALYSIS_VARS = ['hfls', 'hfss', 'mlotst', 'pr', 'psl', 'rlds', 'rlus', 
 
 # %%
 if is_notebook():
-    years=range(1951,1955)
+    years=range(1951,1961)
     ece3_experiment_id = 'EC-Earth3_piControl'
     debug=True
     month_lag_max = 1
-    ece3_data_dir = '/gws/nopw/j04/eerie/cache/portegam/EC-Earth3.3/aa3x-exp1-climatology_start'
-    base_output_dir = '/home/users/bantonio/repos/nwp_notebooks/eerie/coupled_experiments/processed_data'
-    analysis_vars = ['hfls', 'hfss', 'mlotst', 'pr', 'psl', 'rlds', 'rlus', 'rsds', 'rsus', 'siconc', 'sithick', 'tas', 'tauu', 'tauv', 'thetao', 'tos', 'uas', 'uo', 'vas', 'vo']
+    # ece3_data_dir = '/gws/nopw/j04/eerie/cache/portegam/EC-Earth3.3/aa3x-exp1-climatology_start'
+    # base_output_dir = '/gws/nopw/j04/eerie/cache/bantonio/processed_spinup_data'
+    # analysis_vars = ['thkcello', 'hfls', 'hfss', 'mlotst', 'pr', 'psl', 
+                     # 'rlds', 'rlus', 'rsds', 'rsus', 'siconc', 
+                     # 'sithick', 'tas', 'tauu', 'tauv', 'thetao', 'tos', 
+                     # 'uas', 'uo', 'vas', 'vo']
     var_glob_string = '*/{var}/*/*'
+    # ace2_data_dir = '/gws/nopw/j04/eerie/cache/bantonio/ace2_data'
     ace2_data_dir = '/home/users/bantonio'
+    analysis_vars = ['thetao', 'sithick', 'tas', 'tos','sos', 'so', 'siconc']
+    ece3_data_dir = '/work/scratch-pw4/portega'
+    base_output_dir = '/home/users/bantonio/repos/ace2_nemo_coupler/notebooks/processed_data'
+    ocean_level_bin_edges=OLEVEL_BIN_EDGES
+    bin_ocean_levels=True
 else:
     parser = ArgumentParser()
-    parser.add_argument('--ece3-experiment-id', type=str, required=True)
-    parser.add_argument('--month-lag-max', type=int, default=None)
-    parser.add_argument('--debug', action='store_true')
-    parser.add_argument('--years', type=str, default='1951-2021')
-    parser.add_argument('--ece3-data-dir', type=str)
-    parser.add_argument('--ace2-data-dir', type=str)
-    parser.add_argument('--base-output-dir', type=str)
-    parser.add_argument('--analysis-vars', nargs='+', default=DEFAULT_ANALYSIS_VARS)
-    parser.add_argument('--var-glob-string', type=str, default='{var}')
+    parser.add_argument('--ece3-experiment-id', type=str, required=True,
+                       help="Experiment ID of the EC-Earth 3 run, e.g. EC-Earth3_piControl")
+    parser.add_argument('--month-lag-max', type=int, default=None, help="The maximum lag to use when calculating lagged correlations")
+    parser.add_argument('--debug', action='store_true', help="Activate debug mode")
+    parser.add_argument('--years', type=str, default='1951-2021',
+                       help="Range of years to process; only the top 10 years will be used if --debug is provided as an arg")
+    parser.add_argument('--ece3-data-dir', type=str,
+                       help="Path to the EC-Earth3 dataset")
+    parser.add_argument('--ace2-data-dir', type=str,
+                       help="Path to the ACE2 data, for grid files in order to regrid to a common regular 1 degree grid, sea mask, and grid area files.")
+    parser.add_argument('--base-output-dir', type=str,
+                       help="Root folder for outputs")
+    parser.add_argument('--analysis-vars', nargs='+', default=DEFAULT_ANALYSIS_VARS,
+                       help="Variables to include in the analysis")
+    parser.add_argument('--var-glob-string', type=str, default='{var}',
+                       help="Glob string to use when selecting data, depending on the file structure. On JASMIN, this is '*/{var}/*/*'")
+    parser.add_argument('--bin-ocean-levels', action='store_true', 
+                        help='If specified, then ocean levels are binned rather than selected'
+                       )
     args = parser.parse_args()
 
     ece3_experiment_id = args.ece3_experiment_id
@@ -118,7 +141,7 @@ else:
     base_output_dir = args.base_output_dir
     analysis_vars = args.analysis_vars
     years = range(int(years_split[0]), int(years_split[1])+1)
-
+    bin_ocean_levels = args.bin_ocean_levels
     if debug:
         years = years[:10]
 
@@ -127,6 +150,7 @@ if 'hist-1950' in ece3_experiment_id or 'historical' in ece3_experiment_id:
 else:
     ece3_years = years
 
+ocean_levels = OLEVEL_BIN_EDGES if bin_ocean_levels else OLEVEL_VALUES
 
 OUTPUT_DIR = os.path.join(base_output_dir, ece3_experiment_id)
 os.makedirs(OUTPUT_DIR, exist_ok=True)
@@ -137,8 +161,6 @@ sea_mask = xr.load_dataarray(os.path.join(ace2_data_dir, "era5_sea_mask_ACE2.nc"
 ace2_grid_area = xr.load_dataset(os.path.join(ace2_data_dir, "gridarea.nc"))['cell_area']
 
 # %%
-
-
 # Make sure atmosphere has at least one variable
 atmosphere_vars = list(set(all_atmosphere_vars).intersection(analysis_vars).union({'tas'}))
 ocean_vars = {'t': list(set(all_ocean_t_vars).intersection(analysis_vars).union({'tos'})),
@@ -149,8 +171,9 @@ ece3_var_lookup = {k: v for k, v in ece3_var_lookup.items() if k in atmosphere_v
 all_renamed_vars = list(ece3_var_lookup.values())
 
 # %%
+print('Loading atmospere data', flush=True)
 # ECE3 data
-ds_list = [load_ece3_data(var=var, 
+ds_list = [load_ece3_data(var=var,
                           ece3_data_dir = os.path.join(ece3_data_dir, var_glob_string.format(var=var)), 
                           years=ece3_years, ece3_experiment_id=ece3_experiment_id) 
                         for var in atmosphere_vars]
@@ -167,16 +190,17 @@ regridder_ece3_atm = xe.Regridder(ece3_atm_ds['tas'].isel(time=0),
                          filename='weights_ece3_atm.nc')
 ece3_atm_ds = regridder_ece3_atm(ece3_atm_ds)
 
-
-
 # %%
+print('Loading ocean data', flush=True)
+
 ocean_ds_dict = {}
 for ocean_grid_type, var_list in ocean_vars.items():
     if len(var_list) > 0:
         ocean_ds_dict[ocean_grid_type] = xr.merge([load_ece3_data(var, 
                                                  ece3_data_dir = os.path.join(ece3_data_dir, var_glob_string.format(var=var)),
                                                  years=ece3_years, 
-                                                 level_values=OLEVEL_VALUES, 
+                                                 level_values=ocean_levels,
+                                                 groupby_bins=True,
                                                  ece3_experiment_id=ece3_experiment_id) 
                                   for var in var_list], compat='no_conflicts')
 
@@ -195,6 +219,7 @@ for ocean_grid_type, var_list in ocean_vars.items():
 
 # %%
 # regridding ECE3 data
+print('Regridding data', flush=True)
 
 ece3_ds = xr.merge([ece3_atm_ds] + list(ocean_ds_dict.values()))
 ece3_ds = convert_dts_to_first_of_month(ece3_ds)
@@ -258,12 +283,13 @@ all_flux_vars = ['mean_surface_sensible_heat_flux',
 flux_vars = list(set(all_flux_vars).intersection(ece3_ds.data_vars))
 
 if len(flux_vars)>0:
-    ice_mask = ece3_ds['sea_ice_fraction'].mean('time') > 0.1
+    ice_mask = ece3_ds['sea_ice_fraction'].mean('time') > 0.15
+    ice_mask_t = ece3_ds['sea_ice_fraction'] > 0.15
     
 for var in flux_vars:
     ece3_ds[var] = xr.where(sea_mask,ece3_ds[var], np.nan)
-    ece3_ds[f'{var}_oce'] = xr.where(ice_mask, np.nan, ece3_ds[var])
-    ece3_ds[f'{var}_ice'] = xr.where(ice_mask, ece3_ds[var], np.nan)
+    ece3_ds[f'{var}_oce'] = xr.where(ice_mask_t, np.nan, ece3_ds[var])
+    ece3_ds[f'{var}_ice'] = xr.where(ice_mask_t, ece3_ds[var], np.nan)
 
 for suffix in ['', '_oce', '_ice']:
     if 'mean_surface_sensible_heat_flux' in ece3_ds.data_vars and 'mean_surface_latent_heat_flux' in ece3_ds.data_vars:
@@ -277,9 +303,6 @@ for suffix in ['', '_oce', '_ice']:
                 
     if 'mean_surface_upward_short_wave_radiation_flux' in ece3_ds.data_vars and 'mean_surface_downward_short_wave_radiation_flux' in ece3_ds.data_vars:
         ece3_ds[f'albedo{suffix}'] = ece3_ds[f'mean_surface_upward_short_wave_radiation_flux{suffix}'] / ece3_ds[f'mean_surface_downward_short_wave_radiation_flux{suffix}']
-
-    
-    
 
 
 # %%
@@ -295,28 +318,10 @@ weights = weights / weights.sum().item()
 time_vals = [pd.Timestamp(dt) for dt in ece3_ds['time'].values]
 
 # %% [markdown]
-# ## Bjerknes feedback
-
-# %%
-try:
-    
-    results_dict, anomaly_ds = bjerknes_feedback_analysis(ece3_ds)
-            
-    if not debug:
-        anomaly_ds[[v for v in anomaly_ds  if v.endswith('gradient')]].to_netcdf(os.path.join(OUTPUT_DIR, f'zonal_pacific_gradients.nc'))
-        
-    if not debug:
-        with open(os.path.join(OUTPUT_DIR, f'bjerknes_correlations.pkl'), 'wb+') as ofh:
-            pickle.dump(results_dict, ofh)
-
-except Exception as e:
-    print('Failed to calculated Bjerknes feedbacks')
-    traceback.print_exc()
-
-# %% [markdown]
 # ## Climate mean state
 
 # %%
+print('Calculating mean state', flush=True)
 
 time_range_dict = {'Pre-1980': [dt for dt in time_vals if dt.year <=1980],
                    'Post-1980': [dt for dt in time_vals if dt.year> 1980],
@@ -327,22 +332,42 @@ time_range_dict = {'Pre-1980': [dt for dt in time_vals if dt.year <=1980],
                    '1st year': time_vals[:12],
                    '5th year': time_vals[48:60],
                    '1st decade': time_vals[:120],
+                   'last 50 years': time_vals[-600:],
                    'All': time_vals}
 
 time_mean_state_dict = {}
 
 for name, tvals in time_range_dict.items():
-
-    time_mean_state_dict[name] = ece3_ds.sel(time=time_vals).mean('time')
+    if len(tvals) > 0:
+        time_mean_state_dict[name] = ece3_ds.sel(time=time_vals).mean('time')
 
 if not debug:
     with open(os.path.join(OUTPUT_DIR, f'time_mean_state_dict.pkl'), 'wb+') as ofh:
         pickle.dump(time_mean_state_dict, ofh)
 
+# %%
+
 # %% [markdown]
 # ## Spatial aggregations
 
 # %%
+print('Calculating spatial aggregations', flush=True)
+
+mean_areas = {'Global': {'min_lat': -90, 'max_lat': 90},
+              'Northern Hemisphere': {'min_lat': 0, 'max_lat': 90},
+                    'Southern Hemisphere': {'min_lat': -90, 'max_lat': 0},
+                    'Tropics': {'min_lat': -20, 'max_lat': 20},
+                    'Northern Extratropics': {'min_lat': 30, 'max_lat': 70},
+                    'Southern Extratropics': {'min_lat': -70, 'max_lat': -30},
+                    'North Atlantic': {'min_lat': 20, 'max_lat': 60, 'min_lon': 280, 'max_lon': 360},
+                    'North Pacific': {'min_lat': 20, 'max_lat': 60, 'min_lon': 160, 'max_lon': 260},
+                    'South Atlantic': {'min_lat': -60, 'max_lat': -20, 'min_lon': 300, 'max_lon': 360},
+                    'South Pacific': {'min_lat': -60, 'max_lat': -20, 'min_lon': 160, 'max_lon': 260},
+                    'Tropical Atlantic': {'min_lat': -20, 'max_lat': 20, 'min_lon': 300, 'max_lon': 360},
+                    'Tropical Pacific': {'min_lat': -20, 'max_lat': 20, 'min_lon': 160, 'max_lon': 260},
+                     'NorthAtlantic26.5N': {'min_lat': 25.9, 'max_lat': 26.9, 'min_lon': 280, 'max_lon': 340}}
+
+
 mean_dict = {}
 
 
@@ -364,13 +389,19 @@ if not debug:
 # ## Lagged correlations
 
 # %%
-if month_lag_max is not None:
-    for lag_vars in [['mean_surface_heat_flux', 'sea_surface_temperature'],
+lag_vars_list = [['mean_surface_heat_flux', 'sea_surface_temperature'],
                      ['10m_u_component_of_wind', '10m_u_component_of_wind'],
                      ['total_heat_flux', 'sea_surface_temperature'],
                      ['mean_surface_latent_heat_flux', 'sea_surface_temperature'],
                      ['mean_surface_downward_short_wave_radiation_flux','sea_surface_temperature']
-                    ]:
+                    ]
+
+# %%
+print('Calculating spatial aggregations', flush=True)
+
+if month_lag_max is not None:
+    for lag_vars in lag_vars_list:
+
         lag_var1 = lag_vars[0]
         lag_var2 = lag_vars[1]
         if lag_var1 in ece3_ds.data_vars and lag_var2 in ece3_ds.data_vars:
@@ -425,7 +456,7 @@ if not debug:
 ocean_drift_var= 'sea_water_potential_temperature'
 
 if ocean_drift_var in ece3_ds.data_vars:
-    _, polyfit_ece3 = detrend_dataarray(ece3_ds[ocean_drift_var].groupby('time.year').mean().sel(latitude=0, method='nearest').sel(longitude=slice(130,260)).sel(olevel=slice(0,1000)), 'year')
+    _, polyfit_ece3 = detrend_dataarray(ece3_ds[ocean_drift_var].groupby('time.year').mean().sel(latitude=0, method='nearest').sel(longitude=slice(130,260)), 'year')
     
     
     if not debug:
@@ -438,6 +469,25 @@ if ocean_drift_var in ece3_ds.data_vars:
     if not debug:
         print(f'Saving Ocean drift data to {OUTPUT_DIR}')
         polyfit.to_netcdf(os.path.join(OUTPUT_DIR, 'polyfit_toce_latitude.nc' ))
+
+# %% [markdown]
+# ## Bjerknes feedback
+
+# %%
+try:
+    
+    results_dict, anomaly_ds = bjerknes_feedback_analysis(ece3_ds)
+            
+    if not debug:
+        anomaly_ds[[v for v in anomaly_ds  if v.endswith('gradient')]].to_netcdf(os.path.join(OUTPUT_DIR, f'zonal_pacific_gradients.nc'))
+        
+    if not debug:
+        with open(os.path.join(OUTPUT_DIR, f'bjerknes_correlations.pkl'), 'wb+') as ofh:
+            pickle.dump(results_dict, ofh)
+
+except Exception as e:
+    print('Failed to calculated Bjerknes feedbacks')
+    traceback.print_exc()
 
 # %% [markdown]
 # ## ENSO analysis

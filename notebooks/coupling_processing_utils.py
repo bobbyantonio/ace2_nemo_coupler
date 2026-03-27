@@ -214,8 +214,7 @@ def load_ds_subset(base_dir, glob_filename, vars_to_select, concat_dim='time', d
 
     return ds
 
-def load_ece3_data(var, ece3_data_dir, years, ece3_experiment_id, level_values=None):
-    
+def load_ece3_data(var, ece3_data_dir, years, ece3_experiment_id, level_values=None, groupby_bins=False):
     ece3_da = []
     for y in years:
         glob_str = os.path.join(ece3_data_dir, f'{var}_*mon_{ece3_experiment_id}_*_{y}01-{y}12.nc')
@@ -231,7 +230,12 @@ def load_ece3_data(var, ece3_data_dir, years, ece3_experiment_id, level_values=N
             tmp_da = tmp_da.rename({'lat': 'latitude', 'lon': 'longitude'})
 
         if 'lev' in tmp_da.dims and level_values is not None:
-            tmp_da = tmp_da.sel(lev=level_values)
+            if groupby_bins:
+                bin_edges = sorted(level_values)
+                bin_labels = [f'{bin_edges[n]}-{bin_edges[n+1]}' for n in range(len(bin_edges)-1)]
+                tmp_da = tmp_da.groupby_bins(group='lev', bins=bin_edges, right=True, labels=bin_labels).mean()
+            else:
+                tmp_da = tmp_da.sel(lev=level_values)
             
         ece3_da.append(tmp_da)
     ece3_da = xr.concat(ece3_da, dim='time')
