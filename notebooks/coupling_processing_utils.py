@@ -253,7 +253,7 @@ def load_ece3_data(var,
         ece3_da.append(tmp_da)
     ece3_da = xr.concat(ece3_da, dim='time', coords='minimal')
 
-    return ece3_da 
+    return ece3_da
 
     
 def load_era5_monthly(var, era5_dir, years):

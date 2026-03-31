@@ -14,8 +14,10 @@ jupytext --sync notebooks/process_ece_data.ipynb;
 
 conda activate ece4
 
-# python -m notebooks.process_ece_data --ece3-experiment-id EC-Earth3_piControl --years 1951-2049 --month-lag-max 1 --ece3-data-dir /work/scratch-pw4/portega --ace2-data-dir /home/users/bantonio --base-output-dir /home/users/bantonio/repos/ace2_nemo_coupler/notebooks/processed_data --analysis-vars thetao sithick tas tos sos so siconc zos --var-glob-string "*/{var}/*/*" --ace2-data-dir /home/users/bantonio --bin-ocean-levels
+python -m notebooks.process_ece_data --ece3-experiment-id EC-Earth3_piControl --output-ece3-experiment-id EC-Earth3_spinup --years 1951-2049 --month-lag-max 1 --ece3-data-dir /gws/nopw/j04/iecdt/bantonio/EC-Earth3_spinup --ace2-data-dir /home/users/bantonio --base-output-dir /gws/nopw/j04/iecdt/bantonio/processed_spinup_data --analysis-vars thetao sithick tas tos sos so siconc zos --var-glob-string "*/{var}/*/*";
 
+# python -m notebooks.process_ece_data --ece3-experiment-id EC-Earth3_piControl --output-ece3-experiment-id ace2-nemo-40yr-spinup-eval --years 1951-2014 --month-lag-max 1 --ece3-data-dir /gws/nopw/j04/iecdt/bantonio/ace2-nemo-40yr-spinup-eval --ace2-data-dir /home/users/bantonio --base-output-dir /gws/nopw/j04/iecdt/bantonio/processed_spinup_data --analysis-vars thetao sithick tas tos sos so siconc zos --var-glob-string "*/{var}/*/*";
 
-python -m notebooks.process_ece_data --ece3-experiment-id EC-Earth3_piControl --years 1951-2014 --month-lag-max 1 --ece3-data-dir /work/scratch-pw4/portega/new-exp-aall --ace2-data-dir /home/users/bantonio --base-output-dir /home/users/bantonio/repos/ace2_nemo_coupler/notebooks/processed_data_2 --analysis-vars thetao sithick tas tos sos so siconc zos --var-glob-string "*/{var}/*/*" --ace2-data-dir /home/users/bantonio --bin-ocean-levels;
+# python -m notebooks.process_ece_data --ece3-experiment-id EC-Earth3_piControl --output-ece3-experiment-id ace2-nemo-70yr-spinup-eval --years 1951-1956 --month-lag-max 1 --ece3-data-dir /gws/nopw/j04/iecdt/bantonio/ace2-nemo-70yr-spinup-eval --ace2-data-dir /home/users/bantonio --base-output-dir /gws/nopw/j04/iecdt/bantonio/processed_spinup_data --analysis-vars sithick tos sos siconc zos --var-glob-string "*/{var}/*/*";
+
 

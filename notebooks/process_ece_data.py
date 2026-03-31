@@ -89,8 +89,9 @@ DEFAULT_ANALYSIS_VARS = ['hfls', 'hfss', 'mlotst', 'pr', 'psl', 'rlds', 'rlus', 
 
 # %%
 if is_notebook():
-    years=range(1951,1952)
+    years=range(1951,2014)
     ece3_experiment_id = 'EC-Earth3_piControl'
+    output_ece3_experiment_id = 'test'
     debug=True
     month_lag_max = 1
     # ece3_data_dir = '/gws/nopw/j04/eerie/cache/portegam/EC-Earth3.3/aa3x-exp1-climatology_start'
@@ -102,15 +103,16 @@ if is_notebook():
     var_glob_string = '*/{var}/*/*'
     # ace2_data_dir = '/gws/nopw/j04/eerie/cache/bantonio/ace2_data'
     ace2_data_dir = '/home/users/bantonio'
-    analysis_vars = ['thetao', 'sithick', 'tas', 'tos','sos', 'so', 'siconc']
-    ece3_data_dir = '/work/scratch-pw4/portega'
+    analysis_vars = ['sithick', 'tos','sos', 'siconc', 'thetao', 'tas']
+    ece3_data_dir = '/gws/nopw/j04/iecdt/bantonio/ace2-nemo-40yr-spinup-eval'
     base_output_dir = '/home/users/bantonio/repos/ace2_nemo_coupler/notebooks/processed_data'
     ocean_level_bin_edges=OLEVEL_BIN_EDGES
-    bin_ocean_levels=True
 else:
     parser = ArgumentParser()
     parser.add_argument('--ece3-experiment-id', type=str, required=True,
                        help="Experiment ID of the EC-Earth 3 run, e.g. EC-Earth3_piControl")
+    parser.add_argument('--output-ece3-experiment-id', type=str, default=None,
+                       help="Output experiment ID, defaults to the ece3_experiment_id")
     parser.add_argument('--month-lag-max', type=int, default=None, help="The maximum lag to use when calculating lagged correlations")
     parser.add_argument('--debug', action='store_true', help="Activate debug mode")
     parser.add_argument('--years', type=str, default='1951-2021',
@@ -125,10 +127,9 @@ else:
                        help="Variables to include in the analysis")
     parser.add_argument('--var-glob-string', type=str, default='{var}',
                        help="Glob string to use when selecting data, depending on the file structure. On JASMIN, this is '*/{var}/*/*'")
-    parser.add_argument('--bin-ocean-levels', action='store_true', 
-                        help='If specified, then ocean levels are binned rather than selected'
-                       )
+
     args = parser.parse_args()
+    print(args, flush=True)
 
     ece3_experiment_id = args.ece3_experiment_id
     debug = args.debug
@@ -140,16 +141,21 @@ else:
     base_output_dir = args.base_output_dir
     analysis_vars = args.analysis_vars
     years = range(int(years_split[0]), int(years_split[1])+1)
-    bin_ocean_levels = args.bin_ocean_levels
     if debug:
         years = years[:10]
+
+    if args.output_ece3_experiment_id is None:
+        output_ece3_experiment_id = ece3_experiment_id
+    else:
+        output_ece3_experiment_id = args.output_ece3_experiment_id
+    
 
 if 'hist-1950' in ece3_experiment_id or 'historical' in ece3_experiment_id:
     ece3_years = sorted(set(range(1951,2014)).intersection(set(years)))
 else:
     ece3_years = years
 
-OUTPUT_DIR = os.path.join(base_output_dir, ece3_experiment_id)
+OUTPUT_DIR = os.path.join(base_output_dir, output_ece3_experiment_id)
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 # ACE2 grid / sea mask
@@ -159,7 +165,7 @@ ace2_grid_area = xr.load_dataset(os.path.join(ace2_data_dir, "gridarea.nc"))['ce
 
 # %%
 # Make sure atmosphere has at least one variable
-atmosphere_vars = list(set(all_atmosphere_vars).intersection(analysis_vars).union({'tas'}))
+atmosphere_vars = list(set(all_atmosphere_vars).intersection(analysis_vars))
 ocean_vars = {'t': list(set(all_ocean_t_vars).intersection(analysis_vars).union({'tos'})),
               'u': list(set(all_ocean_u_vars).intersection(analysis_vars)),
               'v': list(set(all_ocean_v_vars).intersection(analysis_vars))}
@@ -168,154 +174,71 @@ ece3_var_lookup = {k: v for k, v in ece3_var_lookup.items() if k in atmosphere_v
 all_renamed_vars = list(ece3_var_lookup.values())
 
 # %%
-print('Loading atmospere data', flush=True)
-# ECE3 data
-ds_list = [load_ece3_data(var=var,
-                          ece3_data_dir = os.path.join(ece3_data_dir, var_glob_string.format(var=var)), 
-                          years=ece3_years, ece3_experiment_id=ece3_experiment_id) 
-                        for var in atmosphere_vars]
-
-# reset coords required because of mismatch in height for 2-metre temperature and 10m winds
-ece3_atm_ds = xr.merge([item.reset_coords(drop=True) for item in ds_list], compat='no_conflicts')
-
-regridder_ece3_atm = xe.Regridder(ece3_atm_ds['tas'].isel(time=0), 
-                         ace2grid, 
-                         'bilinear',
-                         ignore_degenerate=True, 
-                         reuse_weights=False, 
-                         periodic=True, 
-                         filename='weights_ece3_atm.nc')
-ece3_atm_ds = regridder_ece3_atm(ece3_atm_ds)
-
-
-# %%
-
-def load_ece3_data(var,
-                   ece3_data_dir,
-                   years,
-                   ece3_experiment_id,
-                   level_values=None,
-                   bin_edge_values=None):
-    ece3_da = []
-    for y in years:
-        glob_str = os.path.join(ece3_data_dir, f'{var}_*mon_{ece3_experiment_id}_*_{y}01-{y}12.nc')
-        fp = glob(glob_str)
-        if len(fp) > 1:
-            raise IOError(f'More than one file found for var={var}, year={y}')
-        elif len(fp) == 0:
-            raise IOError(f'No file found for var={var}, year={y}, glob_str={glob_str}')   
-            
-        fp = fp[0]
-        tmp_da = xr.load_dataset(fp)[var]
-        if 'lat' in tmp_da.coords:
-            tmp_da = tmp_da.rename({'lat': 'latitude', 'lon': 'longitude'})
-
-        if 'lev' in tmp_da.dims:
-   
-            if bin_edge_values is not None:
-                bin_edges = sorted(bin_edge_values)
-                bin_labels = [f'{bin_edges[n]}-{bin_edges[n+1]}' for n in range(len(bin_edges)-1)]
-                binned_da = tmp_da.groupby_bins(group='lev', 
-                                                bins=bin_edges, 
-                                                right=True, 
-                                                labels=bin_labels).mean()
-                binned_da.name = f'{var}_binned'
-                ece3_da.append(binned_da)
-                
-            if level_values is not None:
-                tmp_da = tmp_da.sel(lev=level_values, method='nearest')
-            
+if len(atmosphere_vars) > 0:
+    print('Loading atmospere data', flush=True)
+    # ECE3 data
+    ds_list = [load_ece3_data(var=var,
+                              ece3_data_dir = os.path.join(ece3_data_dir, var_glob_string.format(var=var)), 
+                              years=ece3_years, ece3_experiment_id=ece3_experiment_id) 
+                            for var in atmosphere_vars]
     
-        ece3_da.append(tmp_da)
-    ece3_da = xr.concat(ece3_da, dim='time', coords='minimal')
-
-    return ece3_da 
-
-# %%
-var='thetao'
-tmp_ece3_data_dir = os.path.join(ece3_data_dir, var_glob_string.format(var=var))
-years=ece3_years
-level_values=OLEVEL_VALUES
-bin_edge_values=OLEVEL_BIN_EDGES
-ece3_experiment_id=ece3_experiment_id
-
-# %%
-ece3_da = []
-y=years[0]
-glob_str = os.path.join(tmp_ece3_data_dir, f'{var}_*mon_{ece3_experiment_id}_*_{y}01-{y}12.nc')
-fp = glob(glob_str)
-if len(fp) > 1:
-    raise IOError(f'More than one file found for var={var}, year={y}')
-elif len(fp) == 0:
-    raise IOError(f'No file found for var={var}, year={y}, glob_str={glob_str}')   
+    # reset coords required because of mismatch in height for 2-metre temperature and 10m winds
+    ece3_atm_ds = xr.merge([item.reset_coords(drop=True) for item in ds_list], compat='no_conflicts')
     
-fp = fp[0]
-tmp_da = xr.load_dataset(fp)[var]
-if 'lat' in tmp_da.coords:
-    tmp_da = tmp_da.rename({'lat': 'latitude', 'lon': 'longitude'})
+    regridder_ece3_atm = xe.Regridder(ece3_atm_ds['tas'].isel(time=0), 
+                             ace2grid, 
+                             'bilinear',
+                             ignore_degenerate=True, 
+                             reuse_weights=False, 
+                             periodic=True, 
+                             filename='weights_ece3_atm.nc')
+    ece3_atm_ds = regridder_ece3_atm(ece3_atm_ds)
+else:
+    ece3_atm_ds = None
 
-if 'lev' in tmp_da.dims:
+# %%
+# var='thetao'
+# tmp_ece3_data_dir = os.path.join(ece3_data_dir, var_glob_string.format(var=var))
+# years=ece3_years
+# level_values=OLEVEL_VALUES
+# bin_edge_values=OLEVEL_BIN_EDGES
+# ece3_experiment_id=ece3_experiment_id
 
-    if bin_edge_values is not None:
-        bin_edges = sorted(bin_edge_values)
-        bin_labels = [f'{bin_edges[n]}-{bin_edges[n+1]}' for n in range(len(bin_edges)-1)]
-        binned_da = tmp_da.groupby_bins(group='lev', 
-                                        bins=bin_edges, 
-                                        right=True, 
-                                        labels=bin_labels).mean()
-        binned_da.name = f'{var}_binned'
-        ece3_da.append(binned_da)
+# %%
+# ece3_da = []
+# y=years[0]
+# glob_str = os.path.join(tmp_ece3_data_dir, f'{var}_*mon_{ece3_experiment_id}_*_{y}01-{y}12.nc')
+# fp = glob(glob_str)
+# if len(fp) > 1:
+#     raise IOError(f'More than one file found for var={var}, year={y}')
+# elif len(fp) == 0:
+#     raise IOError(f'No file found for var={var}, year={y}, glob_str={glob_str}')   
+    
+# fp = fp[0]
+# tmp_da = xr.load_dataset(fp)[var]
+# if 'lat' in tmp_da.coords:
+#     tmp_da = tmp_da.rename({'lat': 'latitude', 'lon': 'longitude'})
+
+# if 'lev' in tmp_da.dims:
+
+#     if bin_edge_values is not None:
+#         bin_edges = sorted(bin_edge_values)
+#         bin_labels = [f'{bin_edges[n]}-{bin_edges[n+1]}' for n in range(len(bin_edges)-1)]
+#         binned_da = tmp_da.groupby_bins(group='lev', 
+#                                         bins=bin_edges, 
+#                                         right=True, 
+#                                         labels=bin_labels).mean()
+#         binned_da.name = f'{var}_binned'
+#         ece3_da.append(binned_da)
         
-    if level_values is not None:
-        tmp_da = tmp_da.sel(lev=level_values, method='nearest')
+#     if level_values is not None:
+#         tmp_da = tmp_da.sel(lev=level_values, method='nearest')
     
 
-ece3_da.append(tmp_da)
-ece3_da = xr.concat(ece3_da, dim='time', coords='minimal')
-
+# ece3_da.append(tmp_da)
+# ece3_da = xr.concat(ece3_da, dim='time', coords='minimal')
 
 # %%
-
-def load_ece3_data(var,
-                   ece3_data_dir,
-                   years,
-                   ece3_experiment_id,
-                   level_values=None,
-                   bin_edge_values=None):
-    ece3_da = []
-    for y in years:
-        glob_str = os.path.join(ece3_data_dir, f'{var}_*mon_{ece3_experiment_id}_*_{y}01-{y}12.nc')
-        fp = glob(glob_str)
-        if len(fp) > 1:
-            raise IOError(f'More than one file found for var={var}, year={y}')
-        elif len(fp) == 0:
-            raise IOError(f'No file found for var={var}, year={y}, glob_str={glob_str}')   
-            
-        fp = fp[0]
-        tmp_da = xr.load_dataset(fp)[var]
-        if 'lat' in tmp_da.coords:
-            tmp_da = tmp_da.rename({'lat': 'latitude', 'lon': 'longitude'})
-
-        if 'lev' in tmp_da.dims:
-   
-            if bin_edge_values is not None:
-                bin_edges = sorted(bin_edge_values)
-                bin_labels = [f'{bin_edges[n]}-{bin_edges[n+1]}' for n in range(len(bin_edges)-1)]
-                binned_da = tmp_da.groupby_bins(group='lev', 
-                                                bins=bin_edges, 
-                                                right=True, 
-                                                labels=bin_labels).mean()
-                binned_da.name = f'{var}_binned'
-                tmp_da = xr.merge([tmp_da, binned_da], compat='no_conflicts')
-                
-            if level_values is not None:
-                tmp_da = tmp_da.sel(lev=level_values, method='nearest')
-                
-        ece3_da.append(tmp_da)
-    ece3_da = xr.concat(ece3_da, dim='time', coords='minimal')
-
-    return ece3_da
-
 
 # %%
 print('Loading ocean data', flush=True)
@@ -349,7 +272,10 @@ for ocean_grid_type, var_list in ocean_vars.items():
 # regridding ECE3 data
 print('Regridding data', flush=True)
 
-ece3_ds = xr.merge([ece3_atm_ds] + list(ocean_ds_dict.values()))
+if ece3_atm_ds is not None:
+    ece3_ds = xr.merge([ece3_atm_ds] + list(ocean_ds_dict.values()))
+else:
+    ece3_ds = xr.merge(list(ocean_ds_dict.values()))
 ece3_ds = convert_dts_to_first_of_month(ece3_ds)
 
 ece3_ds = ece3_ds.rename(ece3_var_lookup)
@@ -435,7 +361,8 @@ for suffix in ['', '_oce', '_ice']:
 
 # %%
 # Add 2mt over sea points only
-ece3_ds['2m_temperature_sea_points'] = xr.where(sea_mask, ece3_ds['2m_temperature'], np.nan)
+if '2m_temperature' in ece3_ds.data_vars:
+    ece3_ds['2m_temperature_sea_points'] = xr.where(sea_mask, ece3_ds['2m_temperature'], np.nan)
 
 # %%
 # Weights for calculating global averages
@@ -461,6 +388,14 @@ time_range_dict = {'Pre-1980': [dt for dt in time_vals if dt.year <=1980],
                    '5th year': time_vals[48:60],
                    '1st decade': time_vals[:120],
                    'last 50 years': time_vals[-600:],
+                   'last 20 years': time_vals[-240:],
+                   'last 10 years': time_vals[-120:],
+                   '1980-1990': [dt for dt in time_vals if (1980 <= dt.year <=1990) ],
+                   '1970-1990': [dt for dt in time_vals if (1970 <= dt.year <=1990) ],
+                   '1980-2000': [dt for dt in time_vals if (1980 <= dt.year <=2000) ],
+                   '1990-2000': [dt for dt in time_vals if (1990 <= dt.year <=2000) ],
+                   '2000-2020': [dt for dt in time_vals if (2000 <= dt.year <=2020) ],
+                   '2010-2020': [dt for dt in time_vals if (2010 <= dt.year <=2020) ],
                    'All': time_vals}
 
 time_mean_state_dict = {}
@@ -472,8 +407,6 @@ for name, tvals in time_range_dict.items():
 if not debug:
     with open(os.path.join(OUTPUT_DIR, f'time_mean_state_dict.pkl'), 'wb+') as ofh:
         pickle.dump(time_mean_state_dict, ofh)
-
-# %%
 
 # %% [markdown]
 # ## Spatial aggregations
@@ -567,7 +500,14 @@ trends_time_range_dict = {'Pre-1980': [dt for dt in time_vals if dt.year <=1980]
                            'First 50 Years': time_vals[:600],
                            'Last 50 Years': time_vals[-600:],
                            'Last 20 Years': time_vals[-240:],
+                           'Last 10 Years': time_vals[-120:],
                            'First 20 Years': time_vals[:240],
+                           '1980-1990': [dt for dt in time_vals if (1980 <= dt.year <=1990) ],
+                           '1970-1990': [dt for dt in time_vals if (1970 <= dt.year <=1990) ],
+                           '1980-2000': [dt for dt in time_vals if (1980 <= dt.year <=2000) ],
+                           '1990-2000': [dt for dt in time_vals if (1990 <= dt.year <=2000) ],
+                           '2000-2020': [dt for dt in time_vals if (2000 <= dt.year <=2020) ],
+                           '2010-2020': [dt for dt in time_vals if (2010 <= dt.year <=2020) ],
                            'All': time_vals}
 
 trends_dict = {}
@@ -611,14 +551,14 @@ if ocean_drift_var in ece3_ds.data_vars:
 # if not debug:
 #     print(f'Saving Ocean drift data to {OUTPUT_DIR}')
 #     polyfit.to_netcdf(os.path.join(OUTPUT_DIR, 'polyfit_toce_latitude.nc' ))
-if not debug:
-    print(f'Saving Ocean drift data to {OUTPUT_DIR}')
-    with open(os.path.join(OUTPUT_DIR, f'polyfit_toce_ece3_dict.pkl'), 'wb+') as ofh:
-        pickle.dump(toce_trends_dict, ofh)
-if not debug:
-    print(f'Saving Ocean drift data to {OUTPUT_DIR}')
-    with open(os.path.join(OUTPUT_DIR, f'polyfit_toce_latitude_dict.pkl'), 'wb+') as ofh:
-        pickle.dump(toce_latitude_trends_dict, ofh)
+    if not debug:
+        print(f'Saving Ocean drift data to {OUTPUT_DIR}')
+        with open(os.path.join(OUTPUT_DIR, f'polyfit_toce_ece3_dict.pkl'), 'wb+') as ofh:
+            pickle.dump(toce_trends_dict, ofh)
+    if not debug:
+        print(f'Saving Ocean drift data to {OUTPUT_DIR}')
+        with open(os.path.join(OUTPUT_DIR, f'polyfit_toce_latitude_dict.pkl'), 'wb+') as ofh:
+            pickle.dump(toce_latitude_trends_dict, ofh)
 
 # %% [markdown]
 # ## Bjerknes feedback
