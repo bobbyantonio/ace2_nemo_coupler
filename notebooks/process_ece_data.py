@@ -94,18 +94,11 @@ if is_notebook():
     output_ece3_experiment_id = 'test'
     debug=True
     month_lag_max = 1
-    # ece3_data_dir = '/gws/nopw/j04/eerie/cache/portegam/EC-Earth3.3/aa3x-exp1-climatology_start'
-    # base_output_dir = '/gws/nopw/j04/eerie/cache/bantonio/processed_spinup_data'
-    # analysis_vars = ['thkcello', 'hfls', 'hfss', 'mlotst', 'pr', 'psl', 
-                     # 'rlds', 'rlus', 'rsds', 'rsus', 'siconc', 
-                     # 'sithick', 'tas', 'tauu', 'tauv', 'thetao', 'tos', 
-                     # 'uas', 'uo', 'vas', 'vo']
     var_glob_string = '*/{var}/*/*'
-    # ace2_data_dir = '/gws/nopw/j04/eerie/cache/bantonio/ace2_data'
-    ace2_data_dir = '/home/users/bantonio'
+    ace2_data_dir = '/gws/nopw/j04/iecdt/bantonio/processed_spinup_data'
     analysis_vars = ['sithick', 'tos','sos', 'siconc', 'thetao', 'tas']
     ece3_data_dir = '/gws/nopw/j04/iecdt/bantonio/ace2-nemo-40yr-spinup-eval'
-    base_output_dir = '/home/users/bantonio/repos/ace2_nemo_coupler/notebooks/processed_data'
+    base_output_dir = '/gws/nopw/j04/iecdt/bantonio/processed_spinup_data'
     ocean_level_bin_edges=OLEVEL_BIN_EDGES
 else:
     parser = ArgumentParser()
@@ -396,6 +389,7 @@ time_range_dict = {'Pre-1980': [dt for dt in time_vals if dt.year <=1980],
                    '1990-2000': [dt for dt in time_vals if (1990 <= dt.year <=2000) ],
                    '2000-2020': [dt for dt in time_vals if (2000 <= dt.year <=2020) ],
                    '2010-2020': [dt for dt in time_vals if (2010 <= dt.year <=2020) ],
+                   '2020-2030': [dt for dt in time_vals if (2020 <= dt.year <=2030) ],
                    'All': time_vals}
 
 time_mean_state_dict = {}
@@ -508,6 +502,7 @@ trends_time_range_dict = {'Pre-1980': [dt for dt in time_vals if dt.year <=1980]
                            '1990-2000': [dt for dt in time_vals if (1990 <= dt.year <=2000) ],
                            '2000-2020': [dt for dt in time_vals if (2000 <= dt.year <=2020) ],
                            '2010-2020': [dt for dt in time_vals if (2010 <= dt.year <=2020) ],
+                           '2020-2030': [dt for dt in time_vals if (2020 <= dt.year <=2030) ],
                            'All': time_vals}
 
 trends_dict = {}
