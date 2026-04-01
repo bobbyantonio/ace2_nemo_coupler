@@ -260,9 +260,9 @@ def load_era5_monthly(var, era5_dir, years):
 def load_nemo_ds_subset(base_dir, 
                         glob_filename, 
                         vars_to_select, 
-                        level_values=None, 
+                        level_values=None,
+                        bin_edge_values=None,
                         concat_dim='time',
-                        groupby_bins=False,
                         decode_times=True):
     fps = glob(os.path.join(base_dir, glob_filename))
     ds = []
@@ -274,22 +274,35 @@ def load_nemo_ds_subset(base_dir,
         tmp_ds = xr.open_dataset(fp, decode_times=decode_times)[vars_to_select]
         tmp_ds = tmp_ds.assign_coords({'time_counter': [dt]})
         tmp_ds = tmp_ds.rename({'time_counter': 'time'}).drop_vars('time_centered')
-
-        if 'olevel' in tmp_ds.dims and level_values is not None:
-            if groupby_bins:
-                bin_edges = sorted(level_values)
-                bin_labels = [f'{bin_edges[n]}-{bin_edges[n+1]}' for n in range(len(bin_edges)-1)]
-                tmp_ds = tmp_ds.groupby_bins(group='olevel', bins=bin_edges, right=True, labels=bin_labels).mean()
-            else:
+        
+        if 'olevel' in tmp_ds.dims:
+            vars_with_level = [v for v in tmp_ds.data_vars if 'olevel' in tmp_ds[v].coords]
+        
+            if bin_edge_values is not None:
+                binned_das = []
+                for v in vars_with_level:
+            
+                
+                    bin_edges = sorted(bin_edge_values)
+                    bin_labels = [f'{bin_edges[n]}-{bin_edges[n+1]}' for n in range(len(bin_edges)-1)]
+                    binned_da = tmp_ds[v].groupby_bins(group='olevel', bins=bin_edges, right=True, labels=bin_labels).mean()
+                    
+                    binned_da.name = f'{v}_binned'
+                    binned_das.append(binned_da)
+                tmp_ds = xr.merge([tmp_ds] + binned_das, compat='no_conflicts')
+                
+            if level_values is not None:
+                    
                 tmp_ds = tmp_ds.sel(olevel=level_values)
+            
         ds.append(tmp_ds)
         tmp_ds.close()
         del tmp_ds
         gc.collect()
         
     ds = xr.concat(ds, dim=concat_dim)
-
     return ds
+
 
 def load_oras5_single_level(var, oras5_dir, years):
     

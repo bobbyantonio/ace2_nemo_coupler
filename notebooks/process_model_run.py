@@ -46,7 +46,7 @@ BASE_OUTPUT_DIR = '/home/ecme4254/perm/repos/ace2_nemo_coupler/notebooks/process
 if is_notebook():
     experiment_id = 'n3.6_ace2_1951_spinupCMIP6_19510101-20210101'
     ensemble_members = [0]
-    glob_str = '20*'
+    glob_str = '199*'
     # model_run_dir='/home/ecme4254/perm/old_model_runs'
     model_run_dir ='/home/ecme4254/hpcperm/model_runs'
 
@@ -99,7 +99,7 @@ atm2oce_vars = ['mean_surface_sensible_heat_flux',
            'instantaneous_eastward_turbulent_surface_stress',
            'instantaneous_northward_turbulent_surface_stress']
 
-oce2atm_vars = ['sea_surface_temperature', 'sea_ice_fraction', 'sea_ice_thickness', 'sea_ice_temperature']
+oce2atm_vars = ['sea_ice_fraction', 'sea_ice_thickness', 'sea_ice_temperature']
 
 atmosphere_vars = list(ace2_var_lookup.keys())
 
@@ -123,6 +123,9 @@ oras5_dir = '/scratch/ecme4254/oras5'
 OUTPUT_DIR = os.path.join(BASE_OUTPUT_DIR, experiment_id)
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
+ace2_grid_area = xr.load_dataset("/home/ecme4254/hpcperm/ml_model_data/ace2/gridarea.nc")['cell_area']
+sea_mask = xr.load_dataarray("/hpcperm/ecme4254/ml_model_data/ace2/era5_sea_mask_ACE2.nc")
+
 # %%
 print('Loading atm2oce data', flush=True)
 atm2oce_ds = xr.concat([load_ds_subset(f'{base_dir}_m{n}', f'atm2oce_MS_{model_name}_nemo_{glob_str}.nc', atm2oce_vars).expand_dims({'member': [n]}) for n in ensemble_members], dim='member')
@@ -131,7 +134,7 @@ atm2oce_ds = xr.concat([load_ds_subset(f'{base_dir}_m{n}', f'atm2oce_MS_{model_n
 print('Loading oce2atm data', flush=True)
 
 oce2atm_ds = xr.concat([load_ds_subset(f'{base_dir}_m{n}', f'oce2atm_MS_{model_name}_nemo_{glob_str}.nc', oce2atm_vars).expand_dims({'member': [n]}) for n in ensemble_members], dim='member')
-sea_mask = ~np.isnan(oce2atm_ds['sea_surface_temperature'].isel(time=0, member=0))
+
 
 
 # %%
@@ -160,14 +163,57 @@ expanded_time_vals = sorted(chain.from_iterable([ list(pd.date_range(ml[0], ml[1
 # Samudra levels: 2.5m, 10m, 22.5m, 40m, 65m, 105m, 165m, 250m, 375m, 550m, 775m, 1050m, 1400m, 1850m, 2400m, 3100m, 4000m, 5000m, 6000m
 
 # %%
+# from glob import glob
+# import gc
+# fps = glob(os.path.join('/home/ecme4254/hpcperm/model_runs/n3.6_ace2_1951_spinupCMIP6_19510101-20210101_m0/nemo_output_ace2/nemo_ocean_output_grid_T_20*'))
+# ds = []
+# tmp_base_dir = f'{base_dir}_m0'
+# glob_filename=f'nemo_output_{model_name}/nemo_ocean_output_grid_T_{glob_str}-{glob_str}.nc'
+# vars_to_select= ['toce_pot', 'sss']
+# level_values=OLEVEL_VALUES
+# bin_edge_values=OLEVEL_BIN_EDGES
+# decode_times=False
+
+# %%
+# fp = fps[0]
+# date_str = fp.split('/')[-1].split('_')[-1][:6]
+# dt = pd.Timestamp(date_str + '01')
+
+# tmp_ds = xr.open_dataset(fp, decode_times=decode_times)[vars_to_select]
+# tmp_ds = tmp_ds.assign_coords({'time_counter': [dt]})
+# tmp_ds = tmp_ds.rename({'time_counter': 'time'}).drop_vars('time_centered')
+
+# if 'olevel' in tmp_ds.dims:
+#     vars_with_level = [v for v in tmp_ds.data_vars if 'olevel' in tmp_ds[v].coords]
+
+#     if bin_edge_values is not None:
+#         binned_das = []
+#         for v in vars_with_level:
+    
+        
+#             bin_edges = sorted(bin_edge_values)
+#             bin_labels = [f'{bin_edges[n]}-{bin_edges[n+1]}' for n in range(len(bin_edges)-1)]
+#             binned_da = tmp_ds[v].groupby_bins(group='olevel', bins=bin_edges, right=True, labels=bin_labels).mean()
+
+#             binned_da.name = f'{v}_binned'
+#             binned_das.append(binned_da)
+#         tmp_ds = xr.merge([tmp_ds] + binned_das)
+        
+#     if level_values is not None:
+            
+#         tmp_ds = tmp_ds.sel(olevel=level_values)
+
+
+# %%
 print('Loading NEMO output vars', flush=True)
-nemo_vars_dict = {'T': ['mldr10_1', 'ssh', 'heatc', 'toce_pot', 'sss'],
+nemo_vars_dict = {'T': ['mldr10_1', 'ssh', 'heatc', 'toce_pot', 'sss', 'sst'],
                   'U': ['ssu'],
                   'V': ['ssv']
                  }
 
 rename_dict = {'ssh': 'sea_surface_height', 
                'sss': 'sea_surface_salinity',
+               'sst': 'sea_surface_temperature',
                 'mldr10_1': 'mixed_layer_depth', 
                 'heatc': 'heat_content', 
                'toce_pot':'sea_water_potential_temperature'}
@@ -183,8 +229,8 @@ for grid_string, grid_vars in nemo_vars_dict.items():
     for n in ensemble_members:
         tmp_ds = load_nemo_ds_subset(f'{base_dir}_m{n}', f'nemo_output_{model_name}/nemo_ocean_output_grid_{grid_string}_{glob_str}-{glob_str}.nc', 
                                                                vars_to_select=grid_vars, 
-                                                               level_values=OLEVEL_VALUES, 
-                                                               groupby_bins=True,
+                                                               level_values=OLEVEL_VALUES,
+                                                               bin_edge_values=OLEVEL_BIN_EDGES,
                                                                decode_times=False, 
                                                                concat_dim='time').expand_dims({'member': [n]})
         nemo_ds_dict[grid_string].append(tmp_ds)
@@ -216,7 +262,7 @@ experiment_ds = xr.merge([atm2oce_ds, oce2atm_ds, atmosphere_monthly_ds, nemo_ds
 
 # %%
 # Calculate sea ice volume, and sea ice extent in m**2
-ace2_grid_area = xr.load_dataset("/home/ecme4254/hpcperm/ml_model_data/ace2/gridarea.nc")['cell_area']
+
 experiment_ds['sea_ice_volume'] = experiment_ds['sea_ice_thickness'] * experiment_ds['sea_ice_fraction'] * ace2_grid_area
 experiment_ds['sea_ice_volume'].attrs['long_name'] = 'Sea ice volume'
 experiment_ds['sea_ice_volume'].attrs['standard_name'] = 'sea_ice_volume'
@@ -336,6 +382,14 @@ time_range_dict = {'Pre-1980': [dt for dt in time_vals if dt.year <=1980],
                    '1st year': time_vals[:12],
                    '5th year': time_vals[48:60],
                    '1st decade': time_vals[:120],
+                   'last 10 years': time_vals[-120:],
+                   'last 20 years': time_vals[-240:],
+                   '1980-1990': [dt for dt in time_vals if (1980 <= dt.year <=1990) ],
+                   '1970-1990': [dt for dt in time_vals if (1970 <= dt.year <=1990) ],
+                   '1980-2000': [dt for dt in time_vals if (1980 <= dt.year <=2000) ],
+                   '1990-2000': [dt for dt in time_vals if (1990 <= dt.year <=2000) ],
+                   '2000-2020': [dt for dt in time_vals if (2000 <= dt.year <=2020) ],
+                   '2010-2020': [dt for dt in time_vals if (2010 <= dt.year <=2020) ],
                    'All': time_vals}
 
 time_mean_state_dict = {}
@@ -456,7 +510,15 @@ drift_vars = ['sea_surface_temperature', 'sea_ice_thickness', 'sea_ice_fraction'
 trends_time_range_dict = {'Pre-1980': [dt for dt in time_vals if dt.year <=1980],
                            'Post-1980': [dt for dt in time_vals if dt.year> 1980],
                            'Last 50 Years': time_vals[-600:],
-                           'First 50 Years': time_vals[:600]
+                           'First 50 Years': time_vals[:600],
+                           'Last 20 Years': time_vals[-240:],
+                           'Last 10 Years': time_vals[-120:],
+                           '1980-1990': [dt for dt in time_vals if (1980 <= dt.year <=1990) ],
+                           '1970-1990': [dt for dt in time_vals if (1970 <= dt.year <=1990) ],
+                           '1980-2000': [dt for dt in time_vals if (1980 <= dt.year <=2000) ],
+                           '1990-2000': [dt for dt in time_vals if (1990 <= dt.year <=2000) ],
+                           '2000-2020': [dt for dt in time_vals if (2000 <= dt.year <=2020) ],
+                           '2010-2020': [dt for dt in time_vals if (2010 <= dt.year <=2020) ],
                            'All': time_vals}
 
 trends_dict = {}
@@ -475,7 +537,7 @@ if not debug:
 # %%
 ocean_drift_var= 'sea_water_potential_temperature'
 
-if ocean_drift_var in ece3_ds.data_vars:
+if ocean_drift_var in experiment_ds.data_vars:
     toce_trends_dict = {}
     toce_latitude_trends_dict = {}
 
