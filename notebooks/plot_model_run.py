@@ -5,7 +5,7 @@
 #       extension: .py
 #       format_name: percent
 #       format_version: '1.3'
-#       jupytext_version: 1.17.1
+#       jupytext_version: 1.19.1
 #   kernelspec:
 #     display_name: Python 3.12.9-01
 #     language: python
@@ -695,7 +695,7 @@ fig, axs = plot_maps_shared_colorbar([[xr.where(ice_mask, ace2_nemo_control_time
 
 for ax in axs[0]:
     ax.coastlines()
-    
+
 
 # %%
 
@@ -1674,7 +1674,7 @@ with open(os.path.join(ace2_nemo_control_dir, f'mean_dict.pkl'), 'rb') as ifh:
 
 with open(os.path.join(ece_control_dir, f'mean_dict.pkl'), 'rb') as ifh:
    ece_control_mean_dict = pickle.load(ifh)
-  
+
 
 # %%
 def calculate_relative_monthly_mean_and_std(monthly_data):

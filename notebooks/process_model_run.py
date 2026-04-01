@@ -5,7 +5,7 @@
 #       extension: .py
 #       format_name: percent
 #       format_version: '1.3'
-#       jupytext_version: 1.17.1
+#       jupytext_version: 1.19.1
 #   kernelspec:
 #     display_name: ece4
 #     language: python
@@ -44,6 +44,7 @@ BASE_OUTPUT_DIR = '/home/ecme4254/perm/repos/ace2_nemo_coupler/notebooks/process
 
 # %%
 if is_notebook():
+
     experiment_id = 'n3.6_ace2_1951_spinupCMIP6_19510101-20210101'
     ensemble_members = [0]
     glob_str = '199*'
@@ -232,13 +233,16 @@ for grid_string, grid_vars in nemo_vars_dict.items():
                                                                level_values=OLEVEL_VALUES,
                                                                bin_edge_values=OLEVEL_BIN_EDGES,
                                                                decode_times=False, 
-                                                               concat_dim='time').expand_dims({'member': [n]})
+                                                               concat_dim='time_counter').expand_dims({'member': [n]})
+        # This is necessary due to different values of time_counter for different ensemble members
+        tmp_ds = tmp_ds.sortby('time_counter')
+        tmp_ds = tmp_ds.assign_coords({'time_counter': sorted(atmosphere_monthly_ds['time'].values[:len(tmp_ds['time_counter'].values)])})
+        tmp_ds = tmp_ds.drop_vars('time_centered')
         nemo_ds_dict[grid_string].append(tmp_ds)
-
-
-    nemo_ds_dict[grid_string] = xr.concat(nemo_ds_dict[grid_string], dim='member', join='outer', coords='minimal')
+        
+    nemo_ds_dict[grid_string] = xr.concat(nemo_ds_dict[grid_string], dim='member', join='exact', coords='minimal')
     
-    nemo_ds_dict[grid_string] = nemo_ds_dict[grid_string].rename({k: v for k,v in rename_dict.items() if k in grid_vars})
+    nemo_ds_dict[grid_string] = nemo_ds_dict[grid_string].rename({k: v for k,v in rename_dict.items() if k in grid_vars}).rename({'time_counter': 'time'})
     nemo_ds_dict[grid_string] = nemo_ds_dict[grid_string].sortby('time')
     
     tmp_regridder = xe.Regridder(nemo_ds_dict[grid_string].isel(time=0, member=0), 
@@ -439,12 +443,12 @@ print('Calculating spatial means', flush=True)
 mean_dict = {}
 
 
-for area_name, latlon_dict in mean_areas.items():
+for area_name, lat_dict in mean_areas.items():
     
-    experiment_mean_ds = experiment_ds.sel(latitude=slice(latlon_dict['min_lat'],latlon_dict['max_lat']), longitude=slice(latlon_dict.get('min_lon', 0), latlon_dict.get('max_lon', 360))).weighted(weights.sel(latitude=slice(latlon_dict['min_lat'],latlon_dict['max_lat']))).mean(['latitude', 'longitude']).sortby('time')
+    experiment_mean_ds = experiment_ds.sel(latitude=slice(lat_dict['min_lat'],lat_dict['max_lat'])).weighted(weights.sel(latitude=slice(lat_dict['min_lat'],lat_dict['max_lat']))).mean(['latitude', 'longitude']).sortby('time')
   
     # Unweighted sum, for variables that are already expressed in weighted units (e.g. ice area)
-    experiment_unweighted_sum_ds = experiment_ds.sel(latitude=slice(latlon_dict['min_lat'],latlon_dict['max_lat']), longitude=slice(latlon_dict.get('min_lon', 0), latlon_dict.get('max_lon', 360))).sum(['latitude', 'longitude']).sortby('time')
+    experiment_unweighted_sum_ds = experiment_ds.sel(latitude=slice(lat_dict['min_lat'],lat_dict['max_lat'])).sum(['latitude', 'longitude']).sortby('time')
 
     mean_dict[area_name] = {'mean': experiment_mean_ds,
                             'UnweightedSum': experiment_unweighted_sum_ds

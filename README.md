@@ -112,6 +112,7 @@ These scripts have been generated from Jupyter notebooks using jupytext (See abo
 
 There are slurm scripts created to run the processing for each data type: `slurm/run_coupled_processing.sh` for the ACE2-NEMO data, `slurm/run_coupled_ece3_processing.sh` for EC-Earth3 data, and `slurm/run_coupled_reanalysis_processing.sh` for ERA5 reanalysis.
 
+`slurm/run_coupled_ece3_processing_jasmin.sh` was written to run the ece3 processing on JASMIN (for the spin-up experiment primarily)
 
 
 ## Downloading EC-Earth3 data
