@@ -150,10 +150,13 @@ def non_solar_fluxes_ice(atmosphere_ds, ice_ds, source, clim_ds=None) -> xr.Data
         latent_heat_flux = latent_heat_flux_over_ice(atmosphere_ds, ice_ds)
     latent_heat_flux.name = 'latent_heat_flux_ice'
     
-    return xr.merge([
-        q_long_wave,
-        sensible_heat_flux,
-        latent_heat_flux])
+    output_ds = xr.merge([q_long_wave, sensible_heat_flux, latent_heat_flux])
+    
+    # set fluxes to zero where sea_ice_fraction is less than 0.01
+    ice_mask = ice_ds['sea_ice_fraction'] > 0.01
+    output_ds = xr.where(ice_mask, output_ds, 0.0)
+    
+    return output_ds
 
 
 def get_era5_ocean_data(dt: datetime.datetime,
@@ -213,9 +216,9 @@ def fluxes_to_oasis_structure(flux_ds: xr.Dataset,
     flux_ds['A_Qs_ice'] = flux_ds['solar_flux_over_ice']
     sea_ice_frac = ocean_ds['sea_ice_fraction'].fillna(0.0)
     
-    # Interpolate between sea points and sea-ice points based on sea ice fraction
+    # Interpolate between sea points and sea-ice points based on sea ice fraction (effectively setting ocean fluxes to zero over ice)
     for var in ['A_Qns_oce', 'A_Qs_oce', 'A_TauX_oce', 'A_TauY_oce']:
-        flux_ds[var] = sea_ice_frac * flux_ds[var.replace('oce', 'ice')] + (1 - sea_ice_frac) * flux_ds[var]
+        flux_ds[var] =  (1 - sea_ice_frac) * flux_ds[var]
 
     flux_ds['A_Evap_total'] = sea_ice_frac * flux_ds['A_Evap_ice'] + (1 - sea_ice_frac) * flux_ds['A_Evap_total']
     
