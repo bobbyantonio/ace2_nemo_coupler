@@ -234,6 +234,48 @@ def fluxes_to_oasis_structure(flux_ds: xr.Dataset,
                     longitude=longitude_vals
                 )
 
+def get_era5_fluxes(data_dir, dt, self.base_dataarray):
+    """
+    Get ERA5 fluxes for a given datetime.
+    """ 
+    flux_ds =[]
+    for era5_var in ['mean_surface_sensible_heat_flux', 
+                    'mean_surface_latent_heat_flux', 
+                    'mean_surface_net_long_wave_radiation_flux', 
+                    'evaporation', 
+                    'instantaneous_eastward_turbulent_surface_stress', 
+                    'instantaneous_northward_turbulent_surface_stress', 
+                    'mean_surface_net_short_wave_radiation_flux',
+                    ]:
+        # Gather averages over the coupling timestep
+        tmp_da = xr.load_dataarray(os.path.join(data_dir, 'surface', era5_var, f"era5_{era5_var}_{dt.strftime('%Y%m%d')}.nc")).sel(time=dt)
+        tmp_da.name = era5_var
+        
+        if era5_var == 'evaporation':
+            # Convert to kg/m^2/s from m/hour, by multiplying by 1000 (kg/m^3) and dividing by 3600 (s/hour)
+            tmp_da = tmp_da * 1000 / 3600   
+
+        flux_ds.append(tmp_da)
+    flux_ds = xr.merge(flux_ds)
+    
+    if 'latitude' in flux_ds.coords:
+        flux_ds = flux_ds.regrid.linear(self.base_dataarray)
+
+    # For ERA5, evaporation over ice already calculated properly
+    flux_ds['evaporation_ice'] = flux_ds['evaporation'].copy()
+    
+    flux_ds['momentum_flux_over_ice_x'] = flux_ds['instantaneous_eastward_turbulent_surface_stress'].copy()
+    flux_ds['momentum_flux_over_ice_y'] = flux_ds['instantaneous_northward_turbulent_surface_stress'].copy()
+    
+    flux_ds['solar_flux_over_ice'] = flux_ds['mean_surface_net_short_wave_radiation_flux'].copy()
+
+    flux_ds['sensible_heat_flux_ice'] = flux_ds['mean_surface_sensible_heat_flux'].copy()
+    flux_ds['latent_heat_flux_ice'] = flux_ds['mean_surface_latent_heat_flux'].copy()
+    
+    flux_ds['net_long_wave_radiation_flux_ice'] = flux_ds['mean_surface_net_long_wave_radiation_flux'].copy()
+    
+    return flux_ds
+
 
 def interpolate_surface_specific_humidity(ds: xr.Dataset):
     """
@@ -417,10 +459,10 @@ class FluxCalculator:
         
         # Also extend coastal masking to Antarctica and Arctic circle, even if there isn't sea ice there.
         # Since otherwise there are extreme fluxes that cause problems
-        south_pole_mask = oasis_flux_ds['latitude'] < -60
-        arctic_circle_mask = oasis_flux_ds['latitude'] > 66
-        oasis_flux_ds = xr.where(np.logical_and(filtered_land_mask>0, south_pole_mask), 0.0, oasis_flux_ds)
-        oasis_flux_ds = xr.where(np.logical_and(filtered_land_mask>0, arctic_circle_mask), 0.0, oasis_flux_ds)
+        # south_pole_mask = oasis_flux_ds['latitude'] < -60
+        # arctic_circle_mask = oasis_flux_ds['latitude'] > 66
+        # oasis_flux_ds = xr.where(np.logical_and(filtered_land_mask>0, south_pole_mask), 0.0, oasis_flux_ds)
+        # oasis_flux_ds = xr.where(np.logical_and(filtered_land_mask>0, arctic_circle_mask), 0.0, oasis_flux_ds)
         
         # Important to have no null values
         # Note that sometimes there are null values remaining over Antarctica, hence we fill those with the mean.
@@ -451,41 +493,8 @@ class FluxCalculator:
         
         if atmosphere_source == 'era5':
             # Flux variables taken directly from ERA5
-            flux_ds =[]
-            for era5_var in ['mean_surface_sensible_heat_flux', 
-                            'mean_surface_latent_heat_flux', 
-                            'mean_surface_net_long_wave_radiation_flux', 
-                            'evaporation', 
-                            'instantaneous_eastward_turbulent_surface_stress', 
-                            'instantaneous_northward_turbulent_surface_stress', 
-                            'mean_surface_net_short_wave_radiation_flux',
-                            ]:
-                # Gather averages over the coupling timestep
-                tmp_da = xr.load_dataarray(os.path.join(data_dir, 'surface', era5_var, f"era5_{era5_var}_{dt.strftime('%Y%m%d')}.nc")).sel(time=dt)
-                tmp_da.name = era5_var
-                
-                if era5_var == 'evaporation':
-                    # Convert to kg/m^2/s from m/hour, by multiplying by 1000 (kg/m^3) and dividing by 3600 (s/hour)
-                    tmp_da = tmp_da * 1000 / 3600   
-
-                flux_ds.append(tmp_da)
-            flux_ds = xr.merge(flux_ds)
             
-            if 'latitude' in flux_ds.coords:
-                flux_ds = flux_ds.regrid.linear(self.base_dataarray)
-
-            # For ERA5, evaporation over ice already calculated properly
-            flux_ds['evaporation_ice'] = flux_ds['evaporation'].copy()
-            
-            flux_ds['momentum_flux_over_ice_x'] = flux_ds['instantaneous_eastward_turbulent_surface_stress'].copy()
-            flux_ds['momentum_flux_over_ice_y'] = flux_ds['instantaneous_northward_turbulent_surface_stress'].copy()
-            
-            flux_ds['solar_flux_over_ice'] = flux_ds['mean_surface_net_short_wave_radiation_flux'].copy()
-
-            flux_ds['sensible_heat_flux_ice'] = flux_ds['mean_surface_sensible_heat_flux'].copy()
-            flux_ds['latent_heat_flux_ice'] = flux_ds['mean_surface_latent_heat_flux'].copy()
-            
-            flux_ds['net_long_wave_radiation_flux_ice'] = flux_ds['mean_surface_net_long_wave_radiation_flux'].copy()
+            flus_ds = get_era5_fluxes(data_dir, dt, self.base_dataarray)
             
             flux_ds = xr.merge([flux_ds, atmosphere_ds])
         
@@ -520,6 +529,45 @@ class FluxCalculator:
             
             flux_ds = xr.merge([flux_ds, non_solar_flux_ds, atmosphere_ds])      
 
+        elif atmosphere_source == 'era5-ace2mimic':
+            calculated_flux_ds = self.calculate_fluxes(atmosphere_ds,
+                                                            ocean_ds,
+                                                            max_iterations=50)
+            
+            era5_flux_ds = get_era5_fluxes(data_dir, 
+                                           dt, 
+                                           self.base_dataarray)
+                        
+            flux_ds = xr.merge([calculated_flux_ds[['instantaneous_eastward_turbulent_surface_stress', 
+                                                    'instantaneous_northward_turbulent_surface_stress', 
+                                                    'latent_heat_of_vaporization']], 
+                                era5_flux_ds[],
+                                atmosphere_ds])  
+
+            
+            # Since latent heat of vaporization is not provided by ACE2, we need to use these formulae
+            # for evaporation over ice
+            flux_ds['evaporation'] = flux_ds['mean_surface_latent_heat_flux'] / (flux_ds['latent_heat_of_vaporization'])
+            
+            ## Replacing ACE2 fluxes over ice with calculated fluxes over ice 
+            non_solar_flux_ds = non_solar_fluxes_ice(atmosphere_ds, ocean_ds, clim_ds=None, source=atmosphere_source)
+                            
+            flux_ds['evaporation_ice'] = non_solar_flux_ds['latent_heat_flux_ice'] / Ls
+                        
+            # Following the ECMWF convention of positive downwards
+            flux_ds['mean_surface_net_long_wave_radiation_flux'] = flux_ds['mean_surface_downward_long_wave_radiation_flux'] - flux_ds['mean_surface_upward_long_wave_radiation_flux']
+            flux_ds['mean_surface_net_short_wave_radiation_flux'] = flux_ds['mean_surface_downward_short_wave_radiation_flux'] - flux_ds['mean_surface_upward_short_wave_radiation_flux']
+            
+            # Since ACE2 has ice in the model, we assume these fluxes are correct over ice as well.
+            flux_ds['net_long_wave_radiation_flux_ice'] = flux_ds['mean_surface_net_long_wave_radiation_flux'].copy()
+            flux_ds['solar_flux_over_ice']  = flux_ds['mean_surface_net_short_wave_radiation_flux'].copy()
+                    
+            flux_ds['sensible_heat_flux_ice'] = non_solar_flux_ds['sensible_heat_flux_ice']
+            flux_ds['latent_heat_flux_ice'] = non_solar_flux_ds['latent_heat_flux_ice']
+            
+            flux_ds['momentum_flux_over_ice_x'], flux_ds['momentum_flux_over_ice_y'] = momentum_flux_over_ice(atmosphere_ds)
+        
+    
         elif atmosphere_source in ['ace2', 'ace2-calculated']:
             # Unfortunately we still need to calculate momentum fluxes, as these aren't provided by ACE2
             calculated_flux_ds = self.calculate_fluxes(atmosphere_ds,
@@ -614,7 +662,15 @@ class FluxCalculator:
             ds = self.get_atmospheric_fields_era5(dt, data_dir, calculated_fluxes=True)
         
             # Need to do this to accomodate ACE2 grid
-            ds = ds.regrid.linear(self.base_dataarray)                        
+            ds = ds.regrid.linear(self.base_dataarray)    
+            
+        elif atmosphere_source == 'era5-ace2mimic':
+            # Combination of ERA5 fluxes with some calculated fluxes, to mimic how ACE2 is coupled
+            ds = self.get_atmospheric_fields_era5(dt, data_dir, calculated_fluxes=True)
+        
+            # Need to do this to accomodate ACE2 grid
+            ds = ds.regrid.linear(self.base_dataarray)    
+                                
         elif atmosphere_source == 'gencast':
             ds = self.get_atmospheric_fields_gencast(dt, data_dir)
         elif atmosphere_source in ['ace2', 'ace2-calculated']:
@@ -927,7 +983,7 @@ if __name__ == "__main__":
     if args.debug:
         n_coupling_steps = 5  # For debugging, just run for 5 coupling steps
 
-    if args.atmosphere_source in ['era5', 'era5-calculated']:
+    if args.atmosphere_source.startswith('era5'):
         
         atmosphere_directory = args.era5_directory
     else:
@@ -939,7 +995,7 @@ if __name__ == "__main__":
     all_datetimes = [pd.Timestamp(start_datetime + datetime.timedelta(seconds=coupling_timestep_s * n)) for n in range(n_coupling_steps)]
 
     
-    logger.info('Starting Graphcast OASIS component')
+    logger.info('Starting ML OASIS component')
 
     # Mocking for debugging
     if (args.ocean_source == 'era5' and args.atmosphere_source=='era5') or args.debug:

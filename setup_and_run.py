@@ -48,7 +48,7 @@ def get_experiment_id(atmosphere_source,
                       experiment_nickname,
                       nemo_version):
     
-    if atmosphere_source == 'ace2-calculated':
+    if atmosphere_source.endswith('calculated'):
         exp_id_prefix=f'n{nemo_version}_{atmosphere_source}-{flux_calculation}'
     else:
         exp_id_prefix=f'n{nemo_version}_{atmosphere_source}'
