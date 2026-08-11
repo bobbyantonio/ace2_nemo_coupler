@@ -1,0 +1,104 @@
+{
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Python: test receiver (gencast)",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "/home/ecme4254/perm/repos/ace2_nemo_coupler/router.py",
+            "console": "integratedTerminal",
+            "justMyCode": false,
+            "args": ["--debug", 
+            "--model-directory", "/ec/res4/hpcperm/ecme4254/run_dir/n4.2_gencast_20101101-20110301_m0",
+            "--ocean-source", "nemo",
+            "--router-data-directory", "/scratch/ecme4254/run_dir/n4.2_gencast_20101101-20110301_m0/router",
+            "--atmosphere-source", "gencast",
+            "--atmospheric-timestep-hrs", "12",
+            "--coupling-timestep-secs", "21600",
+            "--climatology-directory", "/ec/res4/hpcperm/ecme4254/era5/climatology",
+            "--era5-directory", "/home/ecme4254/hpcperm/era5"]
+        }, 
+                {
+            "name": "Python: test receiver (ace2)",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "/home/ecme4254/perm/repos/ace2_nemo_coupler/router.py",
+            "console": "integratedTerminal",
+            "justMyCode": false,
+            "args": ["--debug",
+            "--model-directory", "/home/ecme4254/scratch/run_dir/n3.6_ace2_restart_test_19510101-19510201_m0",
+            "--ocean-source", "nemo",
+            "--router-data-directory", "/home/ecme4254/scratch/run_dir/n3.6_ace2_restart_test_19510101-19510201_m0/router",
+            "--atmosphere-source", "ace2",
+            "--atmosphere-gridfile", "/home/ecme4254/hpcperm/ml_model_data/ace2/grid.nc",
+            "--atmospheric-timestep-hrs", "6",
+            "--coupling-timestep-secs", "21600",
+            "--climatology-directory", "/ec/res4/hpcperm/ecme4254/era5/climatology",
+            "--era5-directory", "/scratch/ecme4254/era5"]
+        }, 
+                {
+            "name": "Python: test receiver (era5)",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "/home/ecme4254/perm/repos/ace2_nemo_coupler/router.py",
+            "console": "integratedTerminal",
+            "justMyCode": false,
+            "args": ["--debug",
+            "--model-directory", "/home/ecme4254/hpcperm/run_dir/n3.6_ace2_19510101-19610101_bulk_ice_fluxes_m0",
+            "--ocean-source", "nemo",
+            "--router-data-directory", "/ec/res4/scratch/ecme4254/run_dir/n3.6_ace2_19510101-19610101_bulk_ice_fluxes_m0/router",
+            "--atmosphere-source", "ace2",
+            "--atmosphere-gridfile", "/home/ecme4254/hpcperm/ml_model_data/ace2/grid.nc",
+            "--atmospheric-timestep-hrs", "6",
+            "--coupling-timestep-secs", "21600",
+            "--climatology-directory", "/ec/res4/scratch/ecme4254/era5/climatology",
+            "--era5-directory", "/ec/res4/scratch/ecme4254/era5"]
+        }, 
+        {
+            "name": "Python: test receiver (era5-ace2mimic)",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "/home/ecme4254/perm/repos/ace2_nemo_coupler/router.py",
+            "console": "integratedTerminal",
+            "justMyCode": false,
+            "args": ["--debug",
+            "--model-directory", "/home/ecme4254/hpcperm/run_dir/n3.6_ace2_19510101-19610101_bulk_ice_fluxes_m0",
+            "--ocean-source", "nemo",
+            "--router-data-directory", "/ec/res4/scratch/ecme4254/run_dir/n3.6_ace2_19510101-19610101_bulk_ice_fluxes_m0/router",
+            "--atmosphere-source", "era5-ace2mimic",
+            "--atmosphere-gridfile", "/home/ecme4254/hpcperm/ml_model_data/ace2/grid.nc",
+            "--atmospheric-timestep-hrs", "6",
+            "--coupling-timestep-secs", "21600",
+            "--climatology-directory", "/ec/res4/scratch/ecme4254/era5/climatology",
+            "--era5-directory", "/ec/res4/scratch/ecme4254/era5"]
+        }, 
+        {
+            "name": "Python: test postprocess",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "/home/ecme4254/perm/repos/ace2_nemo_coupler/postprocess.py",
+            "console": "integratedTerminal",
+            "justMyCode": false,
+            "args": [
+            "--model-directory", "/ec/res4/scratch/ecme4254/run_dir/n3.6_ace2_1951-2021_hist_compressed_19510101-19610101_m0",
+            "--ocean-source", "nemo",
+            "--router-data-directory", "/ec/res4/scratch/ecme4254/run_dir/n3.6_ace2_1951-2021_hist_compressed_19510101-19610101_m0/router",
+            "--atmosphere-source", "ace2",
+            "--results-data-directory", "/scratch/ecme4254/run_dir/test",
+            "--coupling-timestep-secs", "21600"]
+        }, 
+         {
+            "name": "Python: test setup_and_run",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "/home/ecme4254/perm/repos/ace2_nemo_coupler/setup_and_run.py",
+            "console": "integratedTerminal",
+            "justMyCode": false,
+            "args": ["--config-file", "/home/ecme4254/perm/repos/ace2_nemo_coupler/configs/ace2_1951_70year_control.yaml",
+        "--experiment-nickname", "test", "--num-months-per-leg", "120", "--start-at-leg", "0"]
+        }, 
+    ]
+}
