@@ -494,7 +494,7 @@ class FluxCalculator:
         if atmosphere_source == 'era5':
             # Flux variables taken directly from ERA5
             
-            flus_ds = get_era5_fluxes(data_dir, dt, self.base_dataarray)
+            flux_ds = get_era5_fluxes(data_dir, dt, self.base_dataarray)
             
             flux_ds = xr.merge([flux_ds, atmosphere_ds])
         
@@ -537,11 +537,13 @@ class FluxCalculator:
             era5_flux_ds = get_era5_fluxes(data_dir, 
                                            dt, 
                                            self.base_dataarray)
+            
+            calculated_flux_vars = ['instantaneous_eastward_turbulent_surface_stress', 
+                                    'instantaneous_northward_turbulent_surface_stress', 
+                                    'latent_heat_of_vaporization']
                         
-            flux_ds = xr.merge([calculated_flux_ds[['instantaneous_eastward_turbulent_surface_stress', 
-                                                    'instantaneous_northward_turbulent_surface_stress', 
-                                                    'latent_heat_of_vaporization']], 
-                                era5_flux_ds[],
+            flux_ds = xr.merge([calculated_flux_ds[calculated_flux_vars], 
+                                era5_flux_ds[[v for v in era5_flux_ds.data_vars if v not in calculated_flux_vars]],
                                 atmosphere_ds])  
 
             
@@ -553,10 +555,6 @@ class FluxCalculator:
             non_solar_flux_ds = non_solar_fluxes_ice(atmosphere_ds, ocean_ds, clim_ds=None, source=atmosphere_source)
                             
             flux_ds['evaporation_ice'] = non_solar_flux_ds['latent_heat_flux_ice'] / Ls
-                        
-            # Following the ECMWF convention of positive downwards
-            flux_ds['mean_surface_net_long_wave_radiation_flux'] = flux_ds['mean_surface_downward_long_wave_radiation_flux'] - flux_ds['mean_surface_upward_long_wave_radiation_flux']
-            flux_ds['mean_surface_net_short_wave_radiation_flux'] = flux_ds['mean_surface_downward_short_wave_radiation_flux'] - flux_ds['mean_surface_upward_short_wave_radiation_flux']
             
             # Since ACE2 has ice in the model, we assume these fluxes are correct over ice as well.
             flux_ds['net_long_wave_radiation_flux_ice'] = flux_ds['mean_surface_net_long_wave_radiation_flux'].copy()
@@ -678,10 +676,10 @@ class FluxCalculator:
         
         ds = ds.sel(latitude=self.latitude_vals, longitude=self.longitude_vals)
         
-        if atmosphere_source in ['era5-calculated', 'gencast']:
+        if atmosphere_source in ['era5-calculated', 'gencast', 'era5-ace2mimic']:
             ds['specific_humidity_surface'] = interpolate_surface_specific_humidity(ds)
         
-        if atmosphere_source in ['era5-calculated', 'gencast', 'ace2']:
+        if atmosphere_source in ['era5-calculated', 'gencast', 'ace2', 'era5-ace2mimic', 'ace2-calculated']:
             ds['wind_speed'] = np.sqrt(ds['10m_u_component_of_wind']**2 + ds['10m_v_component_of_wind']**2)
             ds['relative_wind_speed_u'] = ds['10m_u_component_of_wind'] - ocean_ds['ocean_current_u']
             ds['relative_wind_speed_v'] = ds['10m_v_component_of_wind'] - ocean_ds['ocean_current_v']
@@ -907,7 +905,9 @@ if __name__ == "__main__":
     parser.add_argument('--model-directory', type=str,
                         help='Run directory of ocean model', required=True)
     parser.add_argument('--router-data-directory', type=str, required=True)
-    parser.add_argument('--atmosphere-source', type=str, choices=['era5', 'era5-calculated', 'gencast', 'ace2', 'ace2-calculated'], required=True)
+    parser.add_argument('--atmosphere-source', type=str, choices=['era5', 'era5-calculated', 
+                                                                  'gencast', 'ace2', 'ace2-calculated',
+                                                                  'era5-ace2mimic'], required=True)
     parser.add_argument('--atmosphere-gridfile', type=str,default=None)
     parser.add_argument('--climatology-directory', type=str, default=None)
     parser.add_argument('--era5-directory', type=str,required=True)
