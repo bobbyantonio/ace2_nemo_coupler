@@ -234,7 +234,7 @@ def fluxes_to_oasis_structure(flux_ds: xr.Dataset,
                     longitude=longitude_vals
                 )
 
-def get_era5_fluxes(data_dir, dt, self.base_dataarray):
+def get_era5_fluxes(data_dir, dt, base_dataarray):
     """
     Get ERA5 fluxes for a given datetime.
     """ 
@@ -259,7 +259,7 @@ def get_era5_fluxes(data_dir, dt, self.base_dataarray):
     flux_ds = xr.merge(flux_ds)
     
     if 'latitude' in flux_ds.coords:
-        flux_ds = flux_ds.regrid.linear(self.base_dataarray)
+        flux_ds = flux_ds.regrid.linear(base_dataarray)
 
     # For ERA5, evaporation over ice already calculated properly
     flux_ds['evaporation_ice'] = flux_ds['evaporation'].copy()
