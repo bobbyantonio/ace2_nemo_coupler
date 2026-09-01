@@ -5,11 +5,11 @@
 #       extension: .py
 #       format_name: percent
 #       format_version: '1.3'
-#       jupytext_version: 1.17.1
+#       jupytext_version: 1.16.6
 #   kernelspec:
-#     display_name: ece4
+#     display_name: graphcast
 #     language: python
-#     name: ece4
+#     name: python3
 # ---
 
 # %%
@@ -17,22 +17,26 @@ import os, sys
 import datetime
 from glob import glob
 import pickle
-import pandas as pd
 import xarray as xr
-import numpy as np
 from pathlib import Path
-from tqdm import tqdm
-sys.path.append("/home/ecme4254/perm/repos/ace2_nemo_coupler")
+from argparse import ArgumentParser
+
+base_dir = Path(os.getcwd())
+
+if not str(base_dir).endswith('ace2_nemo_coupler'):
+    base_dir = base_dir.parent
+    
+sys.path.append(str(base_dir))
 from notebooks.coupling_processing_utils import calculate_linear_relationship, calculate_anomalies, ace2_var_lookup, is_notebook, bjerknes_feedback_analysis
 
 # %%
 experiment_id='samudrace'
 if is_notebook():
     years=range(1951,1955)
-    raw_data_dir = "/home/ecme4254/hpcperm/model_runs/samudrace/"
+    raw_data_dir = "/network/group/aopp/predict/HMC005_ANTONIO_EERIE/predictions/samudrace_70yr"
     debug=True
-    base_output_dir ='/home/ecme4254/perm/repos/ace2_nemo_coupler/notebooks/processed_data'
-    ace2_data_dir = '/home/ecme4254/hpcperm/ml_model_data/ace2/'
+    base_output_dir =os.path.join(base_dir, 'notebooks', 'processed_data')
+    ace2_data_dir = '/network/group/aopp/predict/HMC005_ANTONIO_EERIE/ace2_data'
 else:
     parser = ArgumentParser()
     parser.add_argument('--raw-data-dir', type=str, required=True)
@@ -64,17 +68,17 @@ sea_mask = xr.load_dataarray(os.path.join(ace2_data_dir, "era5_sea_mask_ACE2.nc"
 ace2_grid_area = xr.load_dataset(os.path.join(ace2_data_dir, "gridarea.nc"))['cell_area']
 
 # %%
-atmosphere_ds = xr.load_dataset(samudrace_atmosphere_monthly_mean_predictions.nc")
+atmosphere_ds = xr.load_dataset(os.path.join(raw_data_dir, "atmosphere", "monthly_mean_predictions.nc"))[['PRATEsfc', 'LHTFLsfc','UGRD10m','TMP2m','PRESsfc']]
 
 
 # %%
 atmosphere_ds = atmosphere_ds.rename({'PRATEsfc': 'total_precipitation', 
-                                'LHTFLsfc': 'mean_surface_latent_heat_flux', 
-                                'UGRD10m': '10m_u_component_of_wind',
-                                'TMP2m': '2m_temperature',
-                                'PRESsfc': 'surface_pressure',
-                                'lat': 'latitude', 
-                                'lon': 'longitude'})
+                                    'LHTFLsfc': 'mean_surface_latent_heat_flux', 
+                                    'UGRD10m': '10m_u_component_of_wind',
+                                    'TMP2m': '2m_temperature',
+                                    'PRESsfc': 'surface_pressure',
+                                    'lat': 'latitude', 
+                                    'lon': 'longitude'})
 
 # %%
 atmosphere_ds['total_precipitation_daily'] = atmosphere_ds['total_precipitation']*86400
@@ -82,7 +86,7 @@ atmosphere_ds = atmosphere_ds.isel(sample=0).drop_vars(['counts', 'time'])
 
 
 # %%
-ocean_ds = xr.load_dataset(os.path.join(raw_data_dir, "samudrace_ocean_monthly_mean_predictions.nc"))
+ocean_ds = xr.load_dataset(os.path.join(raw_data_dir, "ocean","monthly_mean_predictions.nc"))[['sst']]
 ocean_ds = ocean_ds.isel(sample=0).drop_vars(['counts'])
 
 # %%
@@ -119,5 +123,3 @@ if not debug:
 if not debug:
     with open(os.path.join(OUTPUT_DIR, f'bjerknes_correlations.pkl'), 'wb+') as ofh:
         pickle.dump(results_dict, ofh)
-
-# %%
