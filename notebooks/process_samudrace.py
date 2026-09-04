@@ -18,14 +18,7 @@ import datetime
 from glob import glob
 import pickle
 import xarray as xr
-<<<<<<< HEAD
-<<<<<<< HEAD
 import xarray_regrid
-=======
->>>>>>> 6c28a6e (Tweaks to samudrace notebook)
-=======
-import xarray_regrid
->>>>>>> 8a11968 (Refined notebook for processing samudrace)
 from pathlib import Path
 from argparse import ArgumentParser
 

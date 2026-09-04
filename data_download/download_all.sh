@@ -51,9 +51,10 @@ script_dir=$(pwd)
 # done
 
 for data_type in "EC-Earth3P_control-1950-3hr"; do
-    for variable in "psl"; do
-        
+    for variable in "tos"; do
+
         output_dir=$SCRATCH/ece3_cmip6_data_download/${data_type}/${variable}
+
         mkdir -p $output_dir
         cd $output_dir
 
