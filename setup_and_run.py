@@ -113,6 +113,7 @@ if __name__ == "__main__":
     forcing_data_dir = config['forcing_data_dir']  # Optional, only needed for ACE2 atmosphere source
     first_step_polling_timeout = config.get('first_step_polling_timeout', 12*3600)  # Timeout in seconds for polling ocean model output files on first step
     from_restart = config['from_restart']
+    freshwater_balance_ind = config.get('freshwater_balance', 1)  # Default to 1 (on) if not specified
     
     # Directory containing ecearth scripts to compile and setup run directory
     ece_script_dir=os.path.join(args.ecearth_dir, 'scripts')
@@ -135,6 +136,10 @@ if __name__ == "__main__":
         atmosphere_source = 'ace2'  # Use ace2 as the source, but with calculated fluxes
         atmosphere_fullname = 'ace2-calculated'
         flux_calculation = 'calculated'
+    elif atmosphere_source == 'era5-ace2mimic':
+        atmosphere_source = 'era5'
+        atmosphere_fullname = 'era5-ace2mimic'
+        flux_calculation = 'standard'
     else:
         flux_calculation = 'standard'
         atmosphere_fullname = atmosphere_source
@@ -195,6 +200,9 @@ if __name__ == "__main__":
         config_name: { nemo_config_source if nemo_config_source is not None else 'null' }
       initialise_atmosphere_from_era5: { 'true' if n==0 else 'false' }
       nemo_coupling_frequency: {coupling_timestep_s}
+    model_config:
+        nemo:
+            freshwater_balance: {freshwater_balance_ind}
     """ 
         logger.info(yaml_content)
         

@@ -13,3 +13,4 @@ ece_script_dir: /perm/ecme4254/repos/ecearth4/scripts
 coupling_timestep_secs: 21600
 forcing_data_dir: /home/ecme4254/scratch/ace2_forcing_data/control_1951-2051
 from_restart: true
+freshwater_balance: 1
