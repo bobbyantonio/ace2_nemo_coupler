@@ -206,6 +206,7 @@ if __name__ == "__main__":
         nemo:
             freshwater_balance: {freshwater_balance_ind}
         coastal_ice_flux_masking: {coastal_ice_flux_masking}
+        infer_solid_precip: {infer_solid_precip}
     """ 
         logger.info(yaml_content)
         
