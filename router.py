@@ -309,7 +309,9 @@ class FluxCalculator:
                  ocean_source: str,
                  latitude_vals: list,
                  longitude_vals: list,
-                 start_from_era5: bool=False):
+                 coastal_ice_flux_masking: bool=True,
+                 start_from_era5: bool=False,
+                 infer_solid_precipitation: bool=True):
         
         self.start_datetime = start_datetime
         self.coupling_timestep_hrs = coupling_timestep_hrs
@@ -328,6 +330,8 @@ class FluxCalculator:
         self.longitude_vals = longitude_vals
         
         self.start_from_era5 = start_from_era5
+        self.coastal_ice_flux_masking = coastal_ice_flux_masking
+        self.infer_solid_precipitation = infer_solid_precipitation
         
         self.flux_ds_upper = None
         self.flux_ds_lower = None
@@ -447,9 +451,11 @@ class FluxCalculator:
         filtered_land_mask = land_mask.copy()
         filtered_land_mask.values = uniform_filter(land_mask.values.astype(np.float32), size=3)
         
-        # Remove fluxes from coastal ice areas, since they cause problems
         oasis_flux_ds = xr.where(land_mask, 0.0, oasis_flux_ds)
-        oasis_flux_ds = xr.where(ice_mask, xr.where(filtered_land_mask>0, 0.0, oasis_flux_ds), oasis_flux_ds)
+        if self.coastal_ice_flux_masking:
+            # Remove fluxes from coastal ice areas, since they cause problems
+            oasis_flux_ds = xr.where(ice_mask, xr.where(filtered_land_mask>0, 0.0, oasis_flux_ds), oasis_flux_ds)
+        oasis_flux_ds = xr.where(land_mask, 0.0, oasis_flux_ds)
         
         # Cap the non-solar fluxes, since they teend to produce extreme values that cause problems with sea ice
         # and sea surface height (also typically near the coast, think there can be problems caused by differences
@@ -635,12 +641,15 @@ class FluxCalculator:
 
         flux_ds['total_non_solar_flux_ice'] = flux_ds['net_long_wave_radiation_flux_ice'] + flux_ds['sensible_heat_flux_ice'] + flux_ds['latent_heat_flux_ice']
 
-        # Infer solid precipitation, based on observation that fraction of solid precipitation is typically 1 over ocean points when 2mt <= 273K
-        cool_mask = atmosphere_ds['2m_temperature'] <= 273
-        
-        cool_sea_mask = np.logical_and(cool_mask, sea_mask)
-        flux_ds['solid_precipitation'] = xr.where(cool_sea_mask, atmosphere_ds['total_precipitation'], 0)
-        flux_ds['liquid_precipitation'] = xr.where(~cool_sea_mask, atmosphere_ds['total_precipitation'], 0)   
+        if self.infer_solid_precipitation:
+            # Infer solid precipitation, based on observation that fraction of solid precipitation is typically 1 over ocean points when 2mt <= 273K
+            cool_mask = atmosphere_ds['2m_temperature'] <= 273
+            
+            cool_sea_mask = np.logical_and(cool_mask, sea_mask)
+            flux_ds['solid_precipitation'] = xr.where(cool_sea_mask, atmosphere_ds['total_precipitation'], 0)
+            flux_ds['liquid_precipitation'] = xr.where(~cool_sea_mask, atmosphere_ds['total_precipitation'], 0)
+        else:
+            flux_ds['solid_precipitation'] = xr.zeros_like(flux_ds['liquid_precipitation'])
 
         
         return flux_ds
@@ -918,6 +927,10 @@ if __name__ == "__main__":
     parser.add_argument('--ocean-source', type=str, choices=['era5', 'nemo'], required=True)
     parser.add_argument('--deactivated-fluxes', nargs='+', default=None,
                         help='List of fluxes to deactivate. freshwater, momentum, heat(sensible and latent heat fluxes)')
+    parser.add_argument('--no-coastal-ice-flux-masking', action="store_true",
+                        help="Whether to disable coastal ice masking")
+    parser.add_argument('--no-solid-precip', action="store_true",
+                        help="Whether to disable solid precipitation calculation")
     parser.add_argument('--start-from-era5', action="store_true",
                         help="Whether to use ERA5 ocean data for initial conditions")
     parser.add_argument('--debug', action="store_true",
@@ -1084,7 +1097,9 @@ if __name__ == "__main__":
                     ocean_source=args.ocean_source,
                     latitude_vals=lat_points,
                     longitude_vals=lon_points,
-                    start_from_era5=args.start_from_era5
+                    start_from_era5=args.start_from_era5,
+                    coastal_ice_flux_masking=not args.no_coastal_ice_flux_masking,
+                    infer_solid_precipitation=not args.no_solid_precip
                 )
 
     for n in range(n_coupling_steps + 1):

@@ -114,6 +114,8 @@ if __name__ == "__main__":
     first_step_polling_timeout = config.get('first_step_polling_timeout', 12*3600)  # Timeout in seconds for polling ocean model output files on first step
     from_restart = config['from_restart']
     freshwater_balance_ind = config.get('freshwater_balance', 1)  # Default to 1 (on) if not specified
+    coastal_ice_flux_masking = config.get('coastal_ice_flux_masking', True)  # Default to True if not specified
+    infer_solid_precip = config.get('infer_solid_precip', True)
     
     # Directory containing ecearth scripts to compile and setup run directory
     ece_script_dir=os.path.join(args.ecearth_dir, 'scripts')
@@ -203,6 +205,7 @@ if __name__ == "__main__":
     model_config:
         nemo:
             freshwater_balance: {freshwater_balance_ind}
+        coastal_ice_flux_masking: {coastal_ice_flux_masking}
     """ 
         logger.info(yaml_content)
         
