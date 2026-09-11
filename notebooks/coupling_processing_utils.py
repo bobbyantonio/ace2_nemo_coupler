@@ -28,7 +28,13 @@ ace2_var_lookup = {'TMP2m': '2m_temperature',
                    'PRESsfc': 'surface_pressure',
                    'Q2m': '2m_specific_humidity',
                    'UGRD10m': '10m_u_component_of_wind',
-                   'VGRD10m': '10m_v_component_of_wind'
+                   'VGRD10m': '10m_v_component_of_wind',
+                   'USWRFsfc': 'mean_surface_upward_short_wave_radiation_flux',
+                   'SHTFLsfc': 'mean_surface_sensible_heat_flux',
+                   'LHTFLsfc': 'mean_surface_latent_heat_flux',
+                   'DSWRFsfc': 'mean_surface_downward_short_wave_radiation_flux',
+                   'ULWRFsfc': 'mean_surface_upward_long_wave_radiation_flux',
+                   'DLWRFsfc': 'mean_surface_downward_long_wave_radiation_flux'
                    }
 for n in range(8):
     ace2_var_lookup[f'specific_total_water_{n}'] = f'specific_total_water_{n}'
