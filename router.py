@@ -451,11 +451,9 @@ class FluxCalculator:
         filtered_land_mask = land_mask.copy()
         filtered_land_mask.values = uniform_filter(land_mask.values.astype(np.float32), size=3)
         
-        oasis_flux_ds = xr.where(land_mask, 0.0, oasis_flux_ds)
         if self.coastal_ice_flux_masking:
             # Remove fluxes from coastal ice areas, since they cause problems
             oasis_flux_ds = xr.where(ice_mask, xr.where(filtered_land_mask>0, 0.0, oasis_flux_ds), oasis_flux_ds)
-        oasis_flux_ds = xr.where(land_mask, 0.0, oasis_flux_ds)
         
         # Cap the non-solar fluxes, since they teend to produce extreme values that cause problems with sea ice
         # and sea surface height (also typically near the coast, think there can be problems caused by differences
