@@ -116,6 +116,7 @@ if __name__ == "__main__":
     freshwater_balance_ind = config.get('freshwater_balance', 1)  # Default to 1 (on) if not specified
     coastal_ice_flux_masking = config.get('coastal_ice_flux_masking', True)  # Default to True if not specified
     infer_solid_precip = config.get('infer_solid_precip', True)
+    slurm_account = config['slurm_account']  # Slurm account to use for job submission
     
     # Directory containing ecearth scripts to compile and setup run directory
     ece_script_dir=os.path.join(args.ecearth_dir, 'scripts')
@@ -184,6 +185,7 @@ if __name__ == "__main__":
 - base.context:
     experiment:
       id: {expid}
+      slurm_account: {slurm_account}
       schedule:
         all: !rrule >
           DTSTART:{start_date}
@@ -352,7 +354,7 @@ python -m run_ace --inference-config {atmosphere_config_file} \
 --first-step-polling-timeout {first_step_polling_timeout};
 """ 
             
-            logger.debug(f'Writing postprocess slurm script to {atmosphere_job_filename}')
+            logger.debug(f'Writing ACE2 slurm script to {atmosphere_job_filename}')
             with open(os.path.join(rundir, atmosphere_job_filename), 'w+') as atm_job_file:
                 atm_job_file.write(atmosphere_slurm_text)
 

@@ -16,3 +16,4 @@ from_restart: true
 freshwater_balance: 1
 coastal_ice_flux_masking: true
 infer_solid_precip: false
+slurm_account: spgbanto

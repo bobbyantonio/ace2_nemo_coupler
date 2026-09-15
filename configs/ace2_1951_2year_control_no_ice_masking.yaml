@@ -15,3 +15,4 @@ forcing_data_dir: /home/ecme4254/scratch/ace2_forcing_data/control_1951-2051
 from_restart: true
 freshwater_balance: 1
 coastal_ice_flux_masking: false
+slurm_account: spgbanto

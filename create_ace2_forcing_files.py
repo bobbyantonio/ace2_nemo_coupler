@@ -23,17 +23,18 @@ import xarray as xr
 # ## Create constant 1951 forcing for 100 years
 
 # %%
-output_folder="/home/ecme4254/scratch/ace2_forcing_data/control_1951-2051"
+end_year = 2101
+output_folder=f"/home/ecme4254/scratch/ace2_forcing_data/control_1951-{end_year}"
 os.makedirs(output_folder, exist_ok=True)
 
 # %%
-ds_1951 = xr.open_dataset("/home/ecme4254/scratch/ace2_forcing_data/historical_1951-2021/forcing_1951.nc")
+ds_1951 = xr.open_dataset("/home/ecme4254/hpcperm/ml_model_data/ace2/forcing_data/forcing_1951.nc")
 
 # %%
 mean_1951_co2 = ds_1951['global_mean_co2'].mean().item()
 
 # %%
-for y in tqdm(range(1951, 2052)):
+for y in tqdm(range(1951, end_year + 1)):
     dts = [np.datetime64(dt, 'ns') for dt in pd.date_range(f'{y}0101-00:00', f'{y}1231-18:00', freq='6h')]
     dts_without_leap_day = [dt for dt in dts if not ((pd.Timestamp(dt).month == 2) and (pd.Timestamp(dt).day == 29))]
 

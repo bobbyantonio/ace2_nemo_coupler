@@ -5,6 +5,7 @@
 #SBATCH --ntasks=1
 #SBATCH --time=00-10:00:00 
 #SBATCH --mem=50gb
+#SBATCH --account=spgbanto
 
 # for data_type in "EC-Earth3P_control-1950-3hr"; do
 #     for variable in "tos"; do
