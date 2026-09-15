@@ -470,7 +470,7 @@ class FluxCalculator:
         
         # Important to have no null values
         # Note that sometimes there are null values remaining over Antarctica, hence we fill those with the mean.
-        oasis_flux_ds = oasis_flux_ds.fillna(0.0)
+        oasis_flux_ds = oasis_flux_ds.fillna(oasis_flux_ds.mean())
         # oasis_flux_ds = oasis_flux_ds.interpolate_na(dim='longitude', method='linear', fill_value="extrapolate").fillna(oasis_flux_ds.mean())
 
         return oasis_flux_ds
