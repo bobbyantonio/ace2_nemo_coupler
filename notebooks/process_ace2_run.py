@@ -19,11 +19,15 @@ from glob import glob
 import pickle
 import pandas as pd
 import xarray as xr
+import xarray_regrid
 import numpy as np
 from pathlib import Path
 from tqdm import tqdm
+import xesmf as xe
+from itertools import chain
+
 sys.path.append("/home/ecme4254/perm/repos/ace2_nemo_coupler")
-from notebooks.coupling_processing_utils import calculate_linear_relationship, calculate_anomalies, ace2_var_lookup, is_notebook, mean_areas
+from notebooks.coupling_processing_utils import calculate_linear_relationship, calculate_anomalies, ace2_var_lookup, ece3_var_lookup, convert_dts_to_first_of_month, is_notebook, mean_areas, OLEVEL_VALUES, load_ece3_data
 
 # %%
 BASE_OUTPUT_DIR = '/home/ecme4254/perm/repos/ace2_nemo_coupler/notebooks/processed_data'
@@ -39,31 +43,84 @@ os.makedirs(OUTPUT_DIR, exist_ok=True)
 sea_mask = xr.load_dataarray("/hpcperm/ecme4254/ml_model_data/ace2/era5_sea_mask_ACE2.nc")
 
 # %%
-experiment_ds = xr.open_dataset(os.path.join(f"/ec/res4/hpcperm/ecme4254/model_runs/ace2/{experiment_id}", "monthly_mean_predictions.nc"))
+atmosphere_ds = xr.open_dataset(os.path.join(f"/ec/res4/hpcperm/ecme4254/model_runs/ace2/{experiment_id}", "monthly_mean_predictions.nc"))
 
 if debug:
-    experiment_ds = experiment_ds.isel(time=slice(0, 12*5))
+    atmosphere_ds = atmosphere_ds.isel(time=slice(0, 12*5))
         
-time_vals = pd.date_range(start="1951-01-01", end="2021-12-31", freq="MS")[: len(experiment_ds['time'])]
+time_vals = pd.date_range(start="1951-01-01", end="2021-12-31", freq="MS")[: len(atmosphere_ds['time'])]
 years = sorted(set(time_vals.year))
 
-experiment_ds = experiment_ds.assign_coords(time=time_vals)
-experiment_ds = experiment_ds.rename({varname: v for varname, v in ace2_var_lookup.items() 
-                                      if varname in experiment_ds.variables}).rename({'lat': 'latitude', 
+atmosphere_ds = atmosphere_ds.assign_coords(time=time_vals)
+atmosphere_ds = atmosphere_ds.rename({varname: v for varname, v in ace2_var_lookup.items() 
+                                      if varname in atmosphere_ds.variables}).rename({'lat': 'latitude', 
                                                                                       'lon': 'longitude'}).isel(sample=0).drop_vars(['init_time', 'valid_time', 'counts'])
 
 
 
 # %%
-experiment_ds['total_precipitation_daily'] = experiment_ds['total_precipitation']*86400
-experiment_ds['mean_surface_heat_flux'] = experiment_ds['mean_surface_latent_heat_flux'] + experiment_ds['mean_surface_sensible_heat_flux']
-experiment_ds['mean_surface_latent_heat_flux'] = -1 * experiment_ds['mean_surface_latent_heat_flux']
-experiment_ds['mean_surface_sensible_heat_flux'] = -1 * experiment_ds['mean_surface_sensible_heat_flux']
+atmosphere_ds['total_precipitation_daily'] = atmosphere_ds['total_precipitation']*86400
+atmosphere_ds['mean_surface_heat_flux'] = atmosphere_ds['mean_surface_latent_heat_flux'] + atmosphere_ds['mean_surface_sensible_heat_flux']
+atmosphere_ds['mean_surface_latent_heat_flux'] = -1 * atmosphere_ds['mean_surface_latent_heat_flux']
+atmosphere_ds['mean_surface_sensible_heat_flux'] = -1 * atmosphere_ds['mean_surface_sensible_heat_flux']
 
 # %%
 # Weights for calculating global averages
-weights = np.cos(np.deg2rad(experiment_ds.latitude))
+weights = np.cos(np.deg2rad(atmosphere_ds.latitude))
 weights = weights / weights.sum().item()
+
+# %%
+ocean_vars = {'t': ['tos', 'siconc', 'sithick']}
+ece3_experiment_id ="EC-Earth3P_control-1950"
+ece3_data_dir = f"/scratch/ecme4254/ece3_cmip6_data_download/{ece3_experiment_id}"
+var_glob_string = '{var}'
+
+# %%
+ocean_ds_dict = {}
+for ocean_grid_type, var_list in ocean_vars.items():
+    if len(var_list) > 0:
+        ocean_ds_dict[ocean_grid_type] = xr.merge([load_ece3_data(var, 
+                                                 ece3_data_dir = os.path.join(ece3_data_dir, var_glob_string.format(var=var)),
+                                                 years=range(1951,2022), 
+                                                 level_values=OLEVEL_VALUES, 
+                                                 ece3_experiment_id=ece3_experiment_id) 
+                                  for var in var_list], compat='no_conflicts')
+
+        if 'siconc' in ocean_ds_dict[ocean_grid_type].data_vars:
+            ocean_ds_dict[ocean_grid_type]['siconc'] = ocean_ds_dict[ocean_grid_type]['siconc']/100.0
+        
+        regridder = xe.Regridder(ocean_ds_dict[ocean_grid_type][var_list[0]].isel(time=0), 
+                                 atmosphere_ds, 
+                                 'bilinear',
+                                 ignore_degenerate=True, 
+                                 reuse_weights=False, 
+                                 periodic=True, 
+                                 filename=f'weights_ece3_oce_{ocean_grid_type}.nc')
+        ocean_ds_dict[ocean_grid_type] = regridder(ocean_ds_dict[ocean_grid_type])
+
+# %%
+ocean_ds = xr.merge(list(ocean_ds_dict.values()))
+
+# %%
+ece3_var_lookup = {k: v for k, v in ece3_var_lookup.items() if k in list(chain.from_iterable(list(ocean_vars.values())))}
+all_renamed_vars = list(ece3_var_lookup.values())
+ocean_ds = convert_dts_to_first_of_month(ocean_ds)
+
+ocean_ds = ocean_ds.rename(ece3_var_lookup)
+
+if 'sea_surface_temperature' in all_renamed_vars:
+    ocean_ds['sea_surface_temperature'] = ocean_ds['sea_surface_temperature'] + 273
+
+# %%
+experiment_ds = xr.merge([atmosphere_ds, ocean_ds])
+
+# %%
+# Load ice data, in order to get ice mask
+ice_mask = experiment_ds['sea_ice_fraction'].mean('time') > 0.1
+
+# %%
+# Have to slightly regrid the sea mask due to very small difference in lat/lon
+sea_mask = sea_mask.astype(np.int8).regrid.linear(experiment_ds) >0
 
 # %%
 for var in ['mean_surface_sensible_heat_flux', 
