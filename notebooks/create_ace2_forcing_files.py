@@ -14,6 +14,7 @@
 
 # %%
 import os
+import calendar
 from tqdm import tqdm
 import numpy as np
 import pandas as pd
@@ -23,37 +24,39 @@ import xarray as xr
 # ## Create forcing with constant CO2 forcing but varying surface temperature
 
 # %%
-output_folder="/home/ecme4254/scratch/ace2_forcing_data/fixedCO2_1951-2051"
-os.makedirs(output_folder, exist_ok=True)
+# output_folder="/home/ecme4254/scratch/ace2_forcing_data/fixedCO2_1951"
+# os.makedirs(output_folder, exist_ok=True)
 
-historical_dir = "/home/ecme4254/scratch/ace2_forcing_data/historical_1951-2021"
+# historical_dir = "/home/ecme4254/scratch/ace2_forcing_data/historical_1951-2021"
 
-ds_1951 = xr.open_dataset(os.path.join(historical_dir, "forcing_1951.nc"))
-mean_1951_co2 = ds_1951['global_mean_co2'].mean().item()
+# ds_1951 = xr.open_dataset(os.path.join(historical_dir, "forcing_1951.nc"))
+# mean_1951_co2 = ds_1951['global_mean_co2'].mean().item()
 
-for y in tqdm(range(1951, 2052)):
+# for y in tqdm(range(1951, 2052)):
     
-    tmp_ds = xr.open_dataset(os.path.join(historical_dir, f'forcing_{y}.nc'))
+#     tmp_ds = xr.open_dataset(os.path.join(historical_dir, f'forcing_{y}.nc'))
     
-    # Set co2 forcing to average over 1951
-    tmp_ds['global_mean_co2'] = tmp_ds['global_mean_co2'] * 0 + mean_1951_co2
+#     # Set co2 forcing to average over 1951
+#     tmp_ds['global_mean_co2'] = tmp_ds['global_mean_co2'] * 0 + mean_1951_co2
         
-    tmp_ds.to_netcdf(os.path.join(output_folder, f'forcing_{y}.nc'))
+#     tmp_ds.to_netcdf(os.path.join(output_folder, f'forcing_{y}.nc'))
 
 # %% [markdown]
 # ## Create constant 1951 forcing for 100 years
 
 # %%
-output_folder="/home/ecme4254/scratch/ace2_forcing_data/control_1951-2051"
+output_folder="/home/ecme4254/scratch/ace2_forcing_data/control-1951"
 os.makedirs(output_folder, exist_ok=True)
 
 # %%
 end_year = 2101
-ds_1951 = xr.open_dataset(f"/home/ecme4254/scratch/ace2_forcing_data/historical_1951-{end_year}/forcing_1951.nc")
+
+# The historical data is downloaded from the ACE2-ERA5 Hugging Face record
+ds_1951 = xr.open_dataset(f"/home/ecme4254/scratch/ace2_forcing_data/historical_1951-2021/forcing_1951.nc")
 mean_1951_co2 = ds_1951['global_mean_co2'].mean().item()
 
 # %%
-for y in tqdm(range(1951, end_year + 1)):
+for y in tqdm(range(2099, end_year + 1)):
     dts = [np.datetime64(dt, 'ns') for dt in pd.date_range(f'{y}0101-00:00', f'{y}1231-18:00', freq='6h')]
     dts_without_leap_day = [dt for dt in dts if not ((pd.Timestamp(dt).month == 2) and (pd.Timestamp(dt).day == 29))]
 
@@ -67,7 +70,7 @@ for y in tqdm(range(1951, end_year + 1)):
     time_dependent_ds = tmp_ds[time_dependent_vars]
     time_independent_ds = tmp_ds[time_independent_vars]
 
-    if y%4 == 0:
+    if calendar.isleap(y):
         dts_with_leap_day = [dt for dt in dts if ((pd.Timestamp(dt).month == 2) and (pd.Timestamp(dt).day == 29))]
         leap_day_ds = time_dependent_ds.sel(time=pd.date_range(f'{y}0228-00:00', f'{y}0228-18:00', freq='6h')).assign_coords(time=dts_with_leap_day)
         time_dependent_ds = xr.concat([time_dependent_ds, leap_day_ds], dim='time')

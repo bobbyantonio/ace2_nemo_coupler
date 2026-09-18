@@ -36,6 +36,7 @@ else:
 
 OUTPUT_DIR = os.path.join(BASE_OUTPUT_DIR, experiment_id)
 os.makedirs(OUTPUT_DIR, exist_ok=True)
+sea_mask = xr.load_dataarray("/hpcperm/ecme4254/ml_model_data/ace2/era5_sea_mask_ACE2.nc")
 
 # %%
 experiment_ds = xr.open_dataset(os.path.join(f"/ec/res4/hpcperm/ecme4254/model_runs/ace2/{experiment_id}", "monthly_mean_predictions.nc"))
@@ -63,6 +64,17 @@ experiment_ds['mean_surface_sensible_heat_flux'] = -1 * experiment_ds['mean_surf
 # Weights for calculating global averages
 weights = np.cos(np.deg2rad(experiment_ds.latitude))
 weights = weights / weights.sum().item()
+
+# %%
+for var in ['mean_surface_sensible_heat_flux', 
+                'mean_surface_latent_heat_flux', 
+                'mean_surface_downward_short_wave_radiation_flux',
+                'mean_surface_upward_short_wave_radiation_flux', 
+                'mean_surface_downward_long_wave_radiation_flux',
+                'mean_surface_upward_long_wave_radiation_flux'
+               ]:
+    experiment_ds[var] = xr.where(sea_mask, experiment_ds[var], np.nan)
+    experiment_ds[f'{var}_oce'] = xr.where(ice_mask, np.nan, experiment_ds[var])
 
 # %% [markdown]
 # ## Climate mean state

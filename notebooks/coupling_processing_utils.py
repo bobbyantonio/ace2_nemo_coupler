@@ -38,7 +38,30 @@ ace2_var_lookup = {'TMP2m': '2m_temperature',
                    }
 for n in range(8):
     ace2_var_lookup[f'specific_total_water_{n}'] = f'specific_total_water_{n}'
-    
+
+ece3_var_lookup = {"tas": "2m_temperature", 
+                   "tos": "sea_surface_temperature",
+                   "siconc": "sea_ice_fraction",
+                   'thetao': 'sea_water_potential_temperature',
+                   "sithick": "sea_ice_thickness",
+                   "pr": "total_precipitation",
+                   "zos": "sea_surface_height", # sea surface height above geoid
+                   "hfls": 'mean_surface_latent_heat_flux',
+                    "hfss": 'mean_surface_sensible_heat_flux',
+                    "rlds": "mean_surface_downward_long_wave_radiation_flux",
+                    "rlus": "mean_surface_upward_long_wave_radiation_flux",
+                    "rsds": "mean_surface_downward_short_wave_radiation_flux",
+                    "rsus": "mean_surface_upward_short_wave_radiation_flux",
+                   "mlotst": "mixed_layer_depth",
+                   'tauu': 'instantaneous_eastward_turbulent_surface_stress',
+                   'tauv': 'instantaneous_northward_turbulent_surface_stress',
+                   "uo": "ssu",
+                   "vo": "ssv",
+                   "uas": "10m_u_component_of_wind",
+                   "vas": "10m_v_component_of_wind",
+                   'psl': 'surface_pressure'
+                  }
+
 GRAVITY = 9.80665  # m/s^2
 AK = [0.0, 5119.90, 13881.3, 19343.5, 20087.1, 15596.7, 8880.45, 3057.27, 0.0]
 BK = [0.0, 0.0, 0.00537781, 0.0597284, 0.203491, 0.438391, 0.680643, 0.873929, 1.0]
