@@ -649,8 +649,8 @@ class FluxCalculator:
             flux_ds['solid_precipitation'] = xr.where(cool_sea_mask, atmosphere_ds['total_precipitation'], 0)
             flux_ds['liquid_precipitation'] = xr.where(~cool_sea_mask, atmosphere_ds['total_precipitation'], 0)
         else:
-            flux_ds['solid_precipitation'] = xr.zeros_like(flux_ds['liquid_precipitation'])
-
+            flux_ds['solid_precipitation'] = xr.zeros_like(flux_ds['total_precipitation'])
+            flux_ds['liquid_precipitation']= flux_ds['total_precipitation']
         
         return flux_ds
     
