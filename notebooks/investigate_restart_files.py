@@ -7,9 +7,9 @@
 #       format_version: '1.3'
 #       jupytext_version: 1.17.1
 #   kernelspec:
-#     display_name: Python 3 (ipykernel)
+#     display_name: ece4
 #     language: python
-#     name: python3
+#     name: ece4
 # ---
 
 # %%
@@ -27,7 +27,7 @@ BASE_FOLDER = '/home/ecme4254/perm/ece3data/nemo'
 ace2_grid_da = xr.load_dataarray("/hpcperm/ecme4254/ml_model_data/ace2/grid.nc")
 
 # %%
-era5_sst_1951 = xr.open_dataarray("/home/ecme4254/scratch/era5/surface/sea_surface_temperature/era5_sea_surface_temperature_19510101.nc").isel(time=0)
+era5_sst_1951 = xr.open_dataarray("/home/ecme4254/hpcperm/era5/surface/sea_surface_temperature/era5_sea_surface_temperature_19510101.nc").isel(time=0)
 
 # %%
 era5_regridder = xe.Regridder(era5_sst_1951,
@@ -94,6 +94,11 @@ regridder = xe.Regridder(oce_restart_ds_dict[y]['tn'].sel(z=0),
                          periodic=True, filename='weights.nc')
 
 # %%
+# Weights for calculating global averages
+weights = np.cos(np.deg2rad(era5_sst_1951.latitude))
+weights = weights / weights.sum().item()
+
+# %%
 from tqdm import tqdm
 
 fig, axs = plt.subplots(1, len(years), figsize=(len(years) *8,len(years)))
@@ -102,6 +107,12 @@ for n, y in tqdm(enumerate(years)):
 
     temp_diff = (oce_restart_ds_dict[y]['tn'].sel(z=0).isel(t=0) + 273 - era5_sst_1951)
     xr.where(sea_mask, temp_diff, np.nan).sel(latitude=slice(-60,60)).plot(ax=axs[n], x='longitude', y='latitude', vmin=-10, vmax=10, cmap='RdBu_r')
-    axs[n].set_title(f"Restart SST ({y}) - ERA5 SST (1951)")
+    axs[n].set_title(f"Restart SST ({y}) - ERA5 SST (1951) {temp_diff.mean()}")
+
+# %%
+temp_diff.mean().item()
+
+# %%
+temp_diff.weighted(weights).mean()
 
 # %%
