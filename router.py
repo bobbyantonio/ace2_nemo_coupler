@@ -1011,7 +1011,7 @@ if __name__ == "__main__":
     logger.info('Starting ML OASIS component')
 
     # Mocking for debugging
-    if (args.ocean_source == 'era5' and args.atmosphere_source=='era5') or args.debug:
+    if (args.ocean_source == 'era5') or args.debug:
         pyoasis = Mock()
         OASIS= Mock()
         OASIS.OUT = 'out'

@@ -361,6 +361,36 @@ experiment_ds['sea_ice_temperature_gradient'] = experiment_ds['2m_temperature'] 
 experiment_ds['surface_temperature_difference'] = experiment_ds['2m_temperature'] - xr.where(ice_mask_t, experiment_ds['sea_ice_temperature'], experiment_ds['sea_surface_temperature'])
 
 # %%
+# Sea ice analysis
+from scipy.ndimage import uniform_filter
+
+# Find which areas are affected by our coastal ice flux fix
+
+land_mask = np.isnan(experiment_ds['sea_surface_temperature'].isel(time=0, member=0))
+tmp_ice_mask = (experiment_ds['sea_ice_fraction'] > 0.1).sel(member=0)
+filtered_land_mask = uniform_filter(land_mask.values.astype(np.float32), size=3)
+
+filtered_land_mask = xr.DataArray(
+    data=filtered_land_mask,
+    dims=land_mask.dims,
+    coords=dict(
+        latitude=land_mask['latitude'].values,
+        longitude=land_mask['longitude'].values
+    )
+)
+
+masked_points = xr.where(ice_mask, xr.where(filtered_land_mask>0, 1, 0), 0)
+
+if not debug:
+    masked_points.to_netcdf(os.path.join(OUTPUT_DIR, f'masked_ice_flux_points.nc'))
+
+# Annoyingly the sea ice fraction thresholds are inconsistent...
+# But the threshold here is more accomodating, so it doesn't lead to inconsistencies
+for v in ['solar_flux_over_ice', 'total_non_solar_flux_ice']:
+    experiment_ds[v] = xr.where(tmp_ice_mask, experiment_ds[v], np.nan)
+    experiment_ds[f'coastal_masked_{v}'] = xr.where(tmp_ice_mask, xr.where(filtered_land_mask>0, 0, experiment_ds[v]), experiment_ds[v])
+
+# %%
 # Weights for calculating global averages
 weights = np.cos(np.deg2rad(atmosphere_monthly_ds.latitude))
 weights = weights / weights.sum().item()
@@ -395,6 +425,7 @@ time_range_dict = {'Pre-1980': [dt for dt in time_vals if dt.year <=1980],
                    'DJF': [dt for dt in time_vals if dt.month in [12,1,2]],
                    '1st month': time_vals[:1],
                    '1st year': time_vals[:12],
+                   '1st 2 years': time_vals[:24],
                    '5th year': time_vals[48:60],
                    '1st decade': time_vals[:120],
                    'last 10 years': time_vals[-120:],

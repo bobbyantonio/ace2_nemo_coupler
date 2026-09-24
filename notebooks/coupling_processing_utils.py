@@ -20,7 +20,9 @@ mean_areas = {'Global': {'min_lat': -90, 'max_lat': 90},
                     'South Atlantic': {'min_lat': -60, 'max_lat': -20, 'min_lon': 300, 'max_lon': 360},
                     'South Pacific': {'min_lat': -60, 'max_lat': -20, 'min_lon': 160, 'max_lon': 260},
                     'Tropical Atlantic': {'min_lat': -20, 'max_lat': 20, 'min_lon': 300, 'max_lon': 360},
-                    'Tropical Pacific': {'min_lat': -20, 'max_lat': 20, 'min_lon': 160, 'max_lon': 260}}
+                    'Tropical Pacific': {'min_lat': -20, 'max_lat': 20, 'min_lon': 160, 'max_lon': 260},
+                    'Northern Polar': {'min_lat': 60, 'max_lat': 90},
+                   'Southern Polar': {'min_lat': -90, 'max_lat': -60}}
 
 ace2_var_lookup = {'TMP2m': '2m_temperature',
                    'surface_temperature': 'surface_temperature', 

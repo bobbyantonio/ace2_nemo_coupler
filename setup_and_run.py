@@ -271,9 +271,6 @@ if __name__ == "__main__":
             if file.endswith('.pkl') or file.endswith('.nc'):
                 os.remove(os.path.join(router_dir, file))
 
-        if args.setup_only:
-            logger.info('Setup only flag set, skipping run')
-            sys.exit(0)
         
         if n > 0:
             ######################################################
@@ -308,7 +305,11 @@ if __name__ == "__main__":
             final_atmosphere_fp = os.path.join(previous_router, f'{atmosphere_source}_{int(previous_num_days_in_leg*24)}h.nc')
             logger.debug(f"Moving final oce2atm file from previous run {final_atmosphere_fp} to {os.path.join(router_dir, f'{atmosphere_source}_0h.nc')}")
             shutil.copy(final_atmosphere_fp, os.path.join(router_dir, f'{atmosphere_source}_0h.nc'))
-            
+
+        if args.setup_only:
+            logger.info('Setup only flag set, skipping run')
+            sys.exit(0)
+                    
         ########################################################
         ## Submit jobs to SLURM
         ######################################################
