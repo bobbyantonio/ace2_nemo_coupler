@@ -24,11 +24,6 @@ logger = logging.getLogger(__name__)
 
 #TODO: incorporate gustiness contribution in momentum fluxes
 
-ERA5_DIR = '/ec/res4/hpcperm/ecme4254/era5'
-
-FIRST_POLL_TIMEOUT = 20 * 60  # 20 minutes
-POLLING_TIMEOUT = 60 * 10  # 10 minutes
-
 stefan_boltzmann = 5.67e-8
 air_density = 1.22
 specific_heat_capacity_air = 1005.0  # J/(kg*K)
@@ -309,6 +304,8 @@ class FluxCalculator:
                  ocean_source: str,
                  latitude_vals: list,
                  longitude_vals: list,
+                 first_poll_timeout: int,
+                 polling_timeout: int,
                  start_from_era5: bool=False):
         
         self.start_datetime = start_datetime
@@ -328,6 +325,8 @@ class FluxCalculator:
         self.longitude_vals = longitude_vals
         
         self.start_from_era5 = start_from_era5
+        self.first_poll_timeout = first_poll_timeout
+        self.polling_timeout = polling_timeout
         
         self.flux_ds_upper = None
         self.flux_ds_lower = None
@@ -444,6 +443,12 @@ class FluxCalculator:
         # Mask out land points and interpolate by longitude to avoid large gradients near the coastline
         land_mask = np.isnan(ocean_ds['sea_surface_temperature'])
         ice_mask = ocean_ds['sea_ice_fraction'] > 0.1
+
+        if self.ocean_source == 'era5':
+            # Account for tiny differences in coordinates
+            _, land_mask = xr.align(flux_ds, land_mask, join="override", copy=False)
+            _, ice_mask = xr.align(flux_ds, ice_mask, join="override", copy=False)
+        
         filtered_land_mask = land_mask.copy()
         filtered_land_mask.values = uniform_filter(land_mask.values.astype(np.float32), size=3)
         
@@ -490,6 +495,10 @@ class FluxCalculator:
                                                 atmosphere_source)
 
         sea_mask = ~np.isnan(ocean_ds['sea_surface_temperature'])
+        if self.ocean_source == 'era5':
+            _, sea_mask = xr.align(atmosphere_ds, sea_mask, join="override", copy=False)
+
+            
         
         if atmosphere_source == 'era5':
             # Flux variables taken directly from ERA5
@@ -656,6 +665,10 @@ class FluxCalculator:
             
             # Need to do this to accomodate ACE2 grid
             ds = ds.regrid.linear(self.base_dataarray)
+            
+            ds['relative_wind_speed_u'] = ds['10m_u_component_of_wind']
+            ds['relative_wind_speed_v'] = ds['10m_v_component_of_wind']
+                        
         elif atmosphere_source == 'era5-calculated':
             ds = self.get_atmospheric_fields_era5(dt, data_dir, calculated_fluxes=True)
         
@@ -681,10 +694,17 @@ class FluxCalculator:
         
         if atmosphere_source in ['era5-calculated', 'gencast', 'ace2', 'era5-ace2mimic', 'ace2-calculated']:
             ds['wind_speed'] = np.sqrt(ds['10m_u_component_of_wind']**2 + ds['10m_v_component_of_wind']**2)
-            ds['relative_wind_speed_u'] = ds['10m_u_component_of_wind'] - ocean_ds['ocean_current_u']
-            ds['relative_wind_speed_v'] = ds['10m_v_component_of_wind'] - ocean_ds['ocean_current_v']
-            ds['relative_wind_speed_ice_u'] = ds['10m_u_component_of_wind'] - ocean_ds['ice_velocity_u']
-            ds['relative_wind_speed_ice_v'] = ds['10m_v_component_of_wind'] - ocean_ds['ice_velocity_v']
+            
+            if self.ocean_source == 'era5':
+                ds['relative_wind_speed_u'] = ds['10m_u_component_of_wind']
+                ds['relative_wind_speed_v'] = ds['10m_v_component_of_wind']
+                ds['relative_wind_speed_ice_u'] = ds['10m_u_component_of_wind']
+                ds['relative_wind_speed_ice_v'] = ds['10m_v_component_of_wind']
+            else:
+                ds['relative_wind_speed_u'] = ds['10m_u_component_of_wind'] - ocean_ds['ocean_current_u'].notnull()
+                ds['relative_wind_speed_v'] = ds['10m_v_component_of_wind'] - ocean_ds['ocean_current_v'].notnull()
+                ds['relative_wind_speed_ice_u'] = ds['10m_u_component_of_wind'] - ocean_ds['ice_velocity_u']
+                ds['relative_wind_speed_ice_v'] = ds['10m_v_component_of_wind'] - ocean_ds['ice_velocity_v']
 
             ds['relative_wind_speed'] = np.sqrt((ds['relative_wind_speed_u'])**2 + (ds['relative_wind_speed_v'])**2)
             ds['relative_wind_speed_ice'] = np.sqrt((ds['relative_wind_speed_ice_u'])**2 + (ds['relative_wind_speed_ice_v'])**2)
@@ -705,7 +725,8 @@ class FluxCalculator:
                         '2m_temperature',
                         'total_precipitation']
         else:
-            era5_vars = ['2m_temperature', 'total_precipitation']
+            era5_vars = ['2m_temperature', 'total_precipitation', '10m_u_component_of_wind',
+                        '10m_v_component_of_wind']
         
         surface_ds = []
         for era5_var in era5_vars:
@@ -738,7 +759,7 @@ class FluxCalculator:
         
         ds = polling2.poll(lambda: xr.load_dataset(os.path.join(data_dir, f"gencast_{dt.strftime('%Y%m%d-%H')}.nc")), 
                         ignore_exceptions=(IOError, ValueError, FileNotFoundError), 
-                        timeout=FIRST_POLL_TIMEOUT if self.poll_counter == 0 else POLLING_TIMEOUT,
+                        timeout=self.first_poll_timeout if self.poll_counter == 0 else self.polling_timeout,
                         step=0.1,
                         log=logging.ERROR).isel(time=0)
         self.poll_counter += 1
@@ -777,7 +798,7 @@ class FluxCalculator:
         logger.debug(f"Polling ACE data in {os.path.join(data_dir, f'ace2_{hour_interval}h.nc')}")
         ds = polling2.poll(lambda: xr.load_dataset(os.path.join(data_dir, f"ace2_{hour_interval}h.nc")), 
                         ignore_exceptions=(IOError, ValueError, FileNotFoundError), 
-                        timeout=FIRST_POLL_TIMEOUT if self.poll_counter == 0 else POLLING_TIMEOUT,
+                        timeout=self.first_poll_timeout if self.poll_counter == 0 else self.polling_timeout,
                         step=0.1,
                         log=logging.ERROR)
         self.poll_counter += 1
@@ -920,6 +941,10 @@ if __name__ == "__main__":
                         help='List of fluxes to deactivate. freshwater, momentum, heat(sensible and latent heat fluxes)')
     parser.add_argument('--start-from-era5', action="store_true",
                         help="Whether to use ERA5 ocean data for initial conditions")
+    parser.add_argument('--first-poll-timeout', type=int, default=20*60,
+                        help="Timeout for first poll in seconds")
+    parser.add_argument('--polling-timeout', type=int, default=10*60,
+                        help="Timeout for subsequent polls in seconds")
     parser.add_argument('--debug', action="store_true",
                         help="activate debugging")
     parser.add_argument('--test-mode', action="store_true",
@@ -981,7 +1006,7 @@ if __name__ == "__main__":
     logger.info(f'Number of atmosphere steps: {n_atmosphere_steps}')
 
     if args.debug:
-        n_coupling_steps = 5  # For debugging, just run for 5 coupling steps
+        n_coupling_steps = 2  # For debugging, just run for 5 coupling steps
 
     if args.atmosphere_source.startswith('era5'):
         
@@ -1084,7 +1109,9 @@ if __name__ == "__main__":
                     ocean_source=args.ocean_source,
                     latitude_vals=lat_points,
                     longitude_vals=lon_points,
-                    start_from_era5=args.start_from_era5
+                    start_from_era5=args.start_from_era5,
+                    first_poll_timeout=args.first_poll_timeout,
+                    polling_timeout=args.polling_timeout,
                 )
 
     for n in range(n_coupling_steps + 1):
@@ -1223,7 +1250,7 @@ if __name__ == "__main__":
     
     polling2.poll(lambda: _nemo_timestep(args.model_directory, itend), 
                         ignore_exceptions=(IOError, ValueError, FileNotFoundError), 
-                        timeout=5*60,
+                        timeout=args.polling_timeout,
                         step=0.1,
                         log=logging.ERROR)
     
