@@ -19,11 +19,16 @@ from glob import glob
 import pickle
 import pandas as pd
 import xarray as xr
+import xarray_regrid
 import numpy as np
 from pathlib import Path
 from tqdm import tqdm
+import xesmf as xe
+from itertools import chain
+
 sys.path.append("/home/ecme4254/perm/repos/ace2_nemo_coupler")
-from notebooks.coupling_processing_utils import calculate_linear_relationship, calculate_anomalies, ace2_var_lookup, is_notebook, mean_areas
+from notebooks.coupling_processing_utils import calculate_linear_relationship, calculate_anomalies, ace2_var_lookup, ece3_var_lookup, \
+convert_dts_to_first_of_month, is_notebook, mean_areas, OLEVEL_VALUES, load_ece3_data, calculate_nino_index
 
 # %%
 BASE_OUTPUT_DIR = '/home/ecme4254/perm/repos/ace2_nemo_coupler/notebooks/processed_data'
@@ -36,33 +41,108 @@ else:
 
 OUTPUT_DIR = os.path.join(BASE_OUTPUT_DIR, experiment_id)
 os.makedirs(OUTPUT_DIR, exist_ok=True)
+ace2_data_dir = "/hpcperm/ecme4254/ml_model_data/ace2"
+sea_mask =  xr.load_dataset(os.path.join(ace2_data_dir, "era5_sea_mask_ACE2.nc"))
+ace2grid = xr.load_dataset(os.path.join(ace2_data_dir, "grid.nc"))
 
 # %%
-experiment_ds = xr.open_dataset(os.path.join(f"/ec/res4/hpcperm/ecme4254/model_runs/ace2/{experiment_id}", "monthly_mean_predictions.nc"))
+atmosphere_ds = xr.open_dataset(os.path.join(f"/ec/res4/hpcperm/ecme4254/model_runs/ace2/{experiment_id}", "monthly_mean_predictions.nc"))
 
 if debug:
-    experiment_ds = experiment_ds.isel(time=slice(0, 12*5))
+    atmosphere_ds = atmosphere_ds.isel(time=slice(0, 12*5))
         
-time_vals = pd.date_range(start="1951-01-01", end="2021-12-31", freq="MS")[: len(experiment_ds['time'])]
+time_vals = pd.date_range(start="1951-01-01", end="2021-12-31", freq="MS")[: len(atmosphere_ds['time'])]
 years = sorted(set(time_vals.year))
 
-experiment_ds = experiment_ds.assign_coords(time=time_vals)
-experiment_ds = experiment_ds.rename({varname: v for varname, v in ace2_var_lookup.items() 
-                                      if varname in experiment_ds.variables}).rename({'lat': 'latitude', 
+atmosphere_ds = atmosphere_ds.assign_coords(time=time_vals)
+atmosphere_ds = atmosphere_ds.rename({varname: v for varname, v in ace2_var_lookup.items() 
+                                      if varname in atmosphere_ds.variables}).rename({'lat': 'latitude', 
                                                                                       'lon': 'longitude'}).isel(sample=0).drop_vars(['init_time', 'valid_time', 'counts'])
 
 
 
 # %%
-experiment_ds['total_precipitation_daily'] = experiment_ds['total_precipitation']*86400
-experiment_ds['mean_surface_heat_flux'] = experiment_ds['mean_surface_latent_heat_flux'] + experiment_ds['mean_surface_sensible_heat_flux']
-experiment_ds['mean_surface_latent_heat_flux'] = -1 * experiment_ds['mean_surface_latent_heat_flux']
-experiment_ds['mean_surface_sensible_heat_flux'] = -1 * experiment_ds['mean_surface_sensible_heat_flux']
+atmosphere_ds['total_precipitation_daily'] = atmosphere_ds['total_precipitation']*86400
+atmosphere_ds['mean_surface_heat_flux'] = atmosphere_ds['mean_surface_latent_heat_flux'] + atmosphere_ds['mean_surface_sensible_heat_flux']
+atmosphere_ds['mean_surface_latent_heat_flux'] = -1 * atmosphere_ds['mean_surface_latent_heat_flux']
+atmosphere_ds['mean_surface_sensible_heat_flux'] = -1 * atmosphere_ds['mean_surface_sensible_heat_flux']
 
 # %%
 # Weights for calculating global averages
-weights = np.cos(np.deg2rad(experiment_ds.latitude))
+weights = np.cos(np.deg2rad(atmosphere_ds.latitude))
 weights = weights / weights.sum().item()
+
+# %%
+ocean_vars = {'t': ['tos', 'siconc', 'sithick']}
+ece3_experiment_id ="EC-Earth3P_control-1950"
+ece3_data_dir = f"/scratch/ecme4254/ece3_cmip6_data_download/{ece3_experiment_id}"
+var_glob_string = '{var}'
+
+# %%
+ocean_ds_dict = {}
+for ocean_grid_type, var_list in ocean_vars.items():
+    if len(var_list) > 0:
+        ocean_ds_dict[ocean_grid_type] = xr.merge([load_ece3_data(var, 
+                                                 ece3_data_dir = os.path.join(ece3_data_dir, var_glob_string.format(var=var)),
+                                                 years=range(1951,2022), 
+                                                 level_values=OLEVEL_VALUES, 
+                                                 ece3_experiment_id=ece3_experiment_id) 
+                                  for var in var_list], compat='no_conflicts')
+
+        if 'siconc' in ocean_ds_dict[ocean_grid_type].data_vars:
+            ocean_ds_dict[ocean_grid_type]['siconc'] = ocean_ds_dict[ocean_grid_type]['siconc']/100.0
+        
+        regridder = xe.Regridder(ocean_ds_dict[ocean_grid_type][var_list[0]].isel(time=0), 
+                                 ace2grid, 
+                                 'bilinear',
+                                 ignore_degenerate=True, 
+                                 reuse_weights=False, 
+                                 periodic=True, 
+                                 filename=f'weights_ece3_oce_{ocean_grid_type}.nc')
+        ocean_ds_dict[ocean_grid_type] = regridder(ocean_ds_dict[ocean_grid_type])
+
+# %%
+ocean_ds = xr.merge(list(ocean_ds_dict.values()))
+
+# %%
+if debug:
+    ocean_ds = ocean_ds.isel(time=slice(0, 12*5))
+
+# %%
+ece3_var_lookup = {k: v for k, v in ece3_var_lookup.items() if k in list(chain.from_iterable(list(ocean_vars.values())))}
+all_renamed_vars = list(ece3_var_lookup.values())
+ocean_ds = convert_dts_to_first_of_month(ocean_ds)
+
+ocean_ds = ocean_ds.rename(ece3_var_lookup)
+
+if 'sea_surface_temperature' in all_renamed_vars:
+    ocean_ds['sea_surface_temperature'] = ocean_ds['sea_surface_temperature'] + 273
+
+# %%
+ocean_ds = ocean_ds.sel(time=atmosphere_ds['time'].values)
+
+# %%
+atmosphere_ds = atmosphere_ds.regrid.linear(ace2grid)
+experiment_ds = xr.merge([atmosphere_ds, ocean_ds], join='exact')
+
+# %%
+# Load ice data, in order to get ice mask
+ice_mask = experiment_ds['sea_ice_fraction'].mean('time') > 0.1
+
+# %%
+# Have to slightly regrid the sea mask due to very small difference in lat/lon
+# sea_mask = sea_mask.astype(np.int8).regrid.linear(experiment_ds) >0
+
+# %%
+for var in ['mean_surface_sensible_heat_flux', 
+                'mean_surface_latent_heat_flux', 
+                'mean_surface_downward_short_wave_radiation_flux',
+                'mean_surface_upward_short_wave_radiation_flux', 
+                'mean_surface_downward_long_wave_radiation_flux',
+                'mean_surface_upward_long_wave_radiation_flux'
+               ]:
+    experiment_ds[var] = xr.where(sea_mask['sst'], experiment_ds[var], np.nan)
+    experiment_ds[f'{var}_oce'] = xr.where(ice_mask, np.nan, experiment_ds[var])
 
 # %% [markdown]
 # ## Climate mean state
@@ -110,7 +190,39 @@ if not debug:
     with open(os.path.join(OUTPUT_DIR, f'mean_dict.pkl'), 'wb+') as ofh:
         pickle.dump(mean_dict, ofh)
 
+# %% [markdown]
+# # Investigate ENSO correlations
+
 # %%
+en34_da = calculate_nino_index(experiment_ds['sea_surface_temperature'], nino_region=3.4)
+en34_da_smoothed = calculate_nino_index(experiment_ds['sea_surface_temperature'], rolling_window=5, nino_region=3.4)
+en34_da_seasonal = calculate_nino_index(experiment_ds['sea_surface_temperature'], remove_seasonal_cycle=False, nino_region=3.4)
+
+en3_da = calculate_nino_index(experiment_ds['sea_surface_temperature'], nino_region=3)
+
+m=0
+if not debug:
+    print(f'Saving Nino timeseries data to {OUTPUT_DIR}')
+    en34_da.to_netcdf(os.path.join(OUTPUT_DIR, f'nino3_4.nc'))
+    en34_da_smoothed.to_netcdf(os.path.join(OUTPUT_DIR, f'nino3_4_smoothed.nc'))
+    en34_da_seasonal.to_netcdf(os.path.join(OUTPUT_DIR, f'nino3_4_seasonal.nc'))
+
+for var in ['total_precipitation_daily']:
+    y = experiment_ds[var]
+    
+    nino_stats_ds = calculate_linear_relationship(en34_da,y)
+    nino_stats_smoothed_ds = calculate_linear_relationship(en34_da_smoothed,y)
+    nino_stats_seasonal_ds = calculate_linear_relationship(en34_da_seasonal,y)
+
+    nino_3_stats_ds = calculate_linear_relationship(en3_da,y)
+    
+    if not debug:
+        print(f'Saving Nino stats data to {OUTPUT_DIR}')
+        nino_stats_ds.to_netcdf(os.path.join(OUTPUT_DIR, f'nino3_4_stats_{var}_m{m}.nc'))
+        nino_stats_smoothed_ds.to_netcdf(os.path.join(OUTPUT_DIR, f'nino3_4_stats_{var}_smoothed_m{m}.nc'))
+        nino_stats_seasonal_ds.to_netcdf(os.path.join(OUTPUT_DIR, f'nino3_4_stats_{var}_seasonal_m{m}.nc'))
+
+        nino_stats_ds.to_netcdf(os.path.join(OUTPUT_DIR, f'nino3_stats_{var}_m{m}.nc'))
 
 # %%
 

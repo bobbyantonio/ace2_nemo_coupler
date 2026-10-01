@@ -11,7 +11,7 @@ atmosphere_repo_dir: /perm/ecme4254/repos/ace
 era5_dir: /hpcperm/ecme4254/era5
 ece_script_dir: /perm/ecme4254/repos/ecearth4/scripts
 coupling_timestep_secs: 21600
-forcing_data_dir: /home/ecme4254/scratch/ace2_forcing_data/control_1951-2051
+forcing_data_dir: /home/ecme4254/scratch/ace2_forcing_data/control-1951
 from_restart: true
 freshwater_balance: 1
 coastal_ice_flux_masking: false

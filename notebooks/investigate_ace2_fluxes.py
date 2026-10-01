@@ -1,4 +1,19 @@
-#!/usr/bin/env python3
+# ---
+# jupyter:
+#   jupytext:
+#     text_representation:
+#       extension: .py
+#       format_name: percent
+#       format_version: '1.3'
+#       jupytext_version: 1.17.1
+#   kernelspec:
+#     display_name: ece4
+#     language: python
+#     name: ece4
+# ---
+
+# %%
+# #!/usr/bin/env python3
 import os, sys
 import time
 import datetime
@@ -23,6 +38,11 @@ logger = logging.getLogger(__name__)
 # logging.basicConfig(format='%(asctime)s %(message)s')
 
 #TODO: incorporate gustiness contribution in momentum fluxes
+
+ERA5_DIR = '/ec/res4/hpcperm/ecme4254/era5'
+
+FIRST_POLL_TIMEOUT = 20 * 60  # 20 minutes
+POLLING_TIMEOUT = 60 * 10  # 10 minutes
 
 stefan_boltzmann = 5.67e-8
 air_density = 1.22
@@ -229,48 +249,6 @@ def fluxes_to_oasis_structure(flux_ds: xr.Dataset,
                     longitude=longitude_vals
                 )
 
-def get_era5_fluxes(data_dir, dt, base_dataarray):
-    """
-    Get ERA5 fluxes for a given datetime.
-    """ 
-    flux_ds =[]
-    for era5_var in ['mean_surface_sensible_heat_flux', 
-                    'mean_surface_latent_heat_flux', 
-                    'mean_surface_net_long_wave_radiation_flux', 
-                    'evaporation', 
-                    'instantaneous_eastward_turbulent_surface_stress', 
-                    'instantaneous_northward_turbulent_surface_stress', 
-                    'mean_surface_net_short_wave_radiation_flux',
-                    ]:
-        # Gather averages over the coupling timestep
-        tmp_da = xr.load_dataarray(os.path.join(data_dir, 'surface', era5_var, f"era5_{era5_var}_{dt.strftime('%Y%m%d')}.nc")).sel(time=dt)
-        tmp_da.name = era5_var
-        
-        if era5_var == 'evaporation':
-            # Convert to kg/m^2/s from m/hour, by multiplying by 1000 (kg/m^3) and dividing by 3600 (s/hour)
-            tmp_da = tmp_da * 1000 / 3600   
-
-        flux_ds.append(tmp_da)
-    flux_ds = xr.merge(flux_ds)
-    
-    if 'latitude' in flux_ds.coords:
-        flux_ds = flux_ds.regrid.linear(base_dataarray)
-
-    # For ERA5, evaporation over ice already calculated properly
-    flux_ds['evaporation_ice'] = flux_ds['evaporation'].copy()
-    
-    flux_ds['momentum_flux_over_ice_x'] = flux_ds['instantaneous_eastward_turbulent_surface_stress'].copy()
-    flux_ds['momentum_flux_over_ice_y'] = flux_ds['instantaneous_northward_turbulent_surface_stress'].copy()
-    
-    flux_ds['solar_flux_over_ice'] = flux_ds['mean_surface_net_short_wave_radiation_flux'].copy()
-
-    flux_ds['sensible_heat_flux_ice'] = flux_ds['mean_surface_sensible_heat_flux'].copy()
-    flux_ds['latent_heat_flux_ice'] = flux_ds['mean_surface_latent_heat_flux'].copy()
-    
-    flux_ds['net_long_wave_radiation_flux_ice'] = flux_ds['mean_surface_net_long_wave_radiation_flux'].copy()
-    
-    return flux_ds
-
 
 def interpolate_surface_specific_humidity(ds: xr.Dataset):
     """
@@ -304,11 +282,7 @@ class FluxCalculator:
                  ocean_source: str,
                  latitude_vals: list,
                  longitude_vals: list,
-                 coastal_ice_flux_masking: bool=True,
-                 first_poll_timeout: int,
-                 polling_timeout: int,
-                 start_from_era5: bool=False,
-                 infer_solid_precipitation: bool=True):
+                 start_from_era5: bool=False):
         
         self.start_datetime = start_datetime
         self.coupling_timestep_hrs = coupling_timestep_hrs
@@ -327,10 +301,6 @@ class FluxCalculator:
         self.longitude_vals = longitude_vals
         
         self.start_from_era5 = start_from_era5
-        self.coastal_ice_flux_masking = coastal_ice_flux_masking
-        self.infer_solid_precipitation = infer_solid_precipitation
-        self.first_poll_timeout = first_poll_timeout
-        self.polling_timeout = polling_timeout
         
         self.flux_ds_upper = None
         self.flux_ds_lower = None
@@ -447,33 +417,14 @@ class FluxCalculator:
         # Mask out land points and interpolate by longitude to avoid large gradients near the coastline
         land_mask = np.isnan(ocean_ds['sea_surface_temperature'])
         ice_mask = ocean_ds['sea_ice_fraction'] > 0.1
-
-        if self.ocean_source == 'era5':
-            # Account for tiny differences in coordinates
-            _, land_mask = xr.align(flux_ds, land_mask, join="override", copy=False)
-            _, ice_mask = xr.align(flux_ds, ice_mask, join="override", copy=False)
-        
         filtered_land_mask = land_mask.copy()
         filtered_land_mask.values = uniform_filter(land_mask.values.astype(np.float32), size=3)
         
+        # Remove fluxes from coastal ice areas, since they cause problems
         oasis_flux_ds = xr.where(land_mask, 0.0, oasis_flux_ds)
-        if self.coastal_ice_flux_masking:
-            # Remove fluxes from coastal ice areas, since they cause problems
-            oasis_flux_ds = xr.where(ice_mask, xr.where(filtered_land_mask>0, 0.0, oasis_flux_ds), oasis_flux_ds)
+        oasis_flux_ds = xr.where(ice_mask, xr.where(filtered_land_mask>0, 0.0, oasis_flux_ds), oasis_flux_ds)
+
         oasis_flux_ds = xr.where(land_mask, 0.0, oasis_flux_ds)
-        
-        # Cap the non-solar fluxes, since they teend to produce extreme values that cause problems with sea ice
-        # and sea surface height (also typically near the coast, think there can be problems caused by differences
-        # in land-sea mask)
-        # oasis_flux_ds['A_Qns_oce'] = xr.where(ice_mask, oasis_flux_ds['A_Qns_oce'].clip(-400,400), oasis_flux_ds['A_Qns_oce'])
-        # oasis_flux_ds['A_Qns_ice'] = xr.where(ice_mask, oasis_flux_ds['A_Qns_ice'].clip(-800,800), oasis_flux_ds['A_Qns_oce'])
-        
-        # Also extend coastal masking to Antarctica and Arctic circle, even if there isn't sea ice there.
-        # Since otherwise there are extreme fluxes that cause problems
-        # south_pole_mask = oasis_flux_ds['latitude'] < -60
-        # arctic_circle_mask = oasis_flux_ds['latitude'] > 66
-        # oasis_flux_ds = xr.where(np.logical_and(filtered_land_mask>0, south_pole_mask), 0.0, oasis_flux_ds)
-        # oasis_flux_ds = xr.where(np.logical_and(filtered_land_mask>0, arctic_circle_mask), 0.0, oasis_flux_ds)
         
         # Important to have no null values
         # Note that sometimes there are null values remaining over Antarctica, hence we fill those with the mean.
@@ -501,15 +452,44 @@ class FluxCalculator:
                                                 atmosphere_source)
 
         sea_mask = ~np.isnan(ocean_ds['sea_surface_temperature'])
-        if self.ocean_source == 'era5':
-            _, sea_mask = xr.align(atmosphere_ds, sea_mask, join="override", copy=False)
-
-            
         
         if atmosphere_source == 'era5':
             # Flux variables taken directly from ERA5
+            flux_ds =[]
+            for era5_var in ['mean_surface_sensible_heat_flux', 
+                            'mean_surface_latent_heat_flux', 
+                            'mean_surface_net_long_wave_radiation_flux', 
+                            'evaporation', 
+                            'instantaneous_eastward_turbulent_surface_stress', 
+                            'instantaneous_northward_turbulent_surface_stress', 
+                            'mean_surface_net_short_wave_radiation_flux',
+                            ]:
+                # Gather averages over the coupling timestep
+                tmp_da = xr.load_dataarray(os.path.join(data_dir, 'surface', era5_var, f"era5_{era5_var}_{dt.strftime('%Y%m%d')}.nc")).sel(time=dt)
+                tmp_da.name = era5_var
+                
+                if era5_var == 'evaporation':
+                    # Convert to kg/m^2/s from m/hour, by multiplying by 1000 (kg/m^3) and dividing by 3600 (s/hour)
+                    tmp_da = tmp_da * 1000 / 3600   
+
+                flux_ds.append(tmp_da)
+            flux_ds = xr.merge(flux_ds)
             
-            flux_ds = get_era5_fluxes(data_dir, dt, self.base_dataarray)
+            if 'latitude' in flux_ds.coords:
+                flux_ds = flux_ds.regrid.linear(self.base_dataarray)
+
+            # For ERA5, evaporation over ice already calculated properly
+            flux_ds['evaporation_ice'] = flux_ds['evaporation'].copy()
+            
+            flux_ds['momentum_flux_over_ice_x'] = flux_ds['instantaneous_eastward_turbulent_surface_stress'].copy()
+            flux_ds['momentum_flux_over_ice_y'] = flux_ds['instantaneous_northward_turbulent_surface_stress'].copy()
+            
+            flux_ds['solar_flux_over_ice'] = flux_ds['mean_surface_net_short_wave_radiation_flux'].copy()
+
+            flux_ds['sensible_heat_flux_ice'] = flux_ds['mean_surface_sensible_heat_flux'].copy()
+            flux_ds['latent_heat_flux_ice'] = flux_ds['mean_surface_latent_heat_flux'].copy()
+            
+            flux_ds['net_long_wave_radiation_flux_ice'] = flux_ds['mean_surface_net_long_wave_radiation_flux'].copy()
             
             flux_ds = xr.merge([flux_ds, atmosphere_ds])
         
@@ -544,43 +524,6 @@ class FluxCalculator:
             
             flux_ds = xr.merge([flux_ds, non_solar_flux_ds, atmosphere_ds])      
 
-        elif atmosphere_source == 'era5-ace2mimic':
-            calculated_flux_ds = self.calculate_fluxes(atmosphere_ds,
-                                                            ocean_ds,
-                                                            max_iterations=50)
-            
-            era5_flux_ds = get_era5_fluxes(data_dir, 
-                                           dt, 
-                                           self.base_dataarray)
-            
-            calculated_flux_vars = ['instantaneous_eastward_turbulent_surface_stress', 
-                                    'instantaneous_northward_turbulent_surface_stress', 
-                                    'latent_heat_of_vaporization']
-                        
-            flux_ds = xr.merge([calculated_flux_ds[calculated_flux_vars], 
-                                era5_flux_ds[[v for v in era5_flux_ds.data_vars if v not in calculated_flux_vars]],
-                                atmosphere_ds])  
-
-            
-            # Since latent heat of vaporization is not provided by ACE2, we need to use these formulae
-            # for evaporation over ice
-            flux_ds['evaporation'] = flux_ds['mean_surface_latent_heat_flux'] / (flux_ds['latent_heat_of_vaporization'])
-            
-            ## Replacing ACE2 fluxes over ice with calculated fluxes over ice 
-            non_solar_flux_ds = non_solar_fluxes_ice(atmosphere_ds, ocean_ds, clim_ds=None, source=atmosphere_source)
-                            
-            flux_ds['evaporation_ice'] = non_solar_flux_ds['latent_heat_flux_ice'] / Ls
-            
-            # Since ACE2 has ice in the model, we assume these fluxes are correct over ice as well.
-            flux_ds['net_long_wave_radiation_flux_ice'] = flux_ds['mean_surface_net_long_wave_radiation_flux'].copy()
-            flux_ds['solar_flux_over_ice']  = flux_ds['mean_surface_net_short_wave_radiation_flux'].copy()
-                    
-            flux_ds['sensible_heat_flux_ice'] = non_solar_flux_ds['sensible_heat_flux_ice']
-            flux_ds['latent_heat_flux_ice'] = non_solar_flux_ds['latent_heat_flux_ice']
-            
-            flux_ds['momentum_flux_over_ice_x'], flux_ds['momentum_flux_over_ice_y'] = momentum_flux_over_ice(atmosphere_ds)
-        
-    
         elif atmosphere_source in ['ace2', 'ace2-calculated']:
             # Unfortunately we still need to calculate momentum fluxes, as these aren't provided by ACE2
             calculated_flux_ds = self.calculate_fluxes(atmosphere_ds,
@@ -650,16 +593,13 @@ class FluxCalculator:
 
         flux_ds['total_non_solar_flux_ice'] = flux_ds['net_long_wave_radiation_flux_ice'] + flux_ds['sensible_heat_flux_ice'] + flux_ds['latent_heat_flux_ice']
 
-        if self.infer_solid_precipitation:
-            # Infer solid precipitation, based on observation that fraction of solid precipitation is typically 1 over ocean points when 2mt <= 273K
-            cool_mask = atmosphere_ds['2m_temperature'] <= 273
-            
-            cool_sea_mask = np.logical_and(cool_mask, sea_mask)
-            flux_ds['solid_precipitation'] = xr.where(cool_sea_mask, atmosphere_ds['total_precipitation'], 0)
-            flux_ds['liquid_precipitation'] = xr.where(~cool_sea_mask, atmosphere_ds['total_precipitation'], 0)
-        else:
-            flux_ds['solid_precipitation'] = xr.zeros_like(flux_ds['total_precipitation'])
-            flux_ds['liquid_precipitation']= flux_ds['total_precipitation']
+        # Infer solid precipitation, based on observation that fraction of solid precipitation is typically 1 over ocean points when 2mt <= 273K
+        cool_mask = atmosphere_ds['2m_temperature'] <= 273
+        
+        cool_sea_mask = np.logical_and(cool_mask, sea_mask)
+        flux_ds['solid_precipitation'] = xr.where(cool_sea_mask, atmosphere_ds['total_precipitation'], 0)
+        flux_ds['liquid_precipitation'] = xr.where(~cool_sea_mask, atmosphere_ds['total_precipitation'], 0)   
+
         
         return flux_ds
     
@@ -674,23 +614,11 @@ class FluxCalculator:
             
             # Need to do this to accomodate ACE2 grid
             ds = ds.regrid.linear(self.base_dataarray)
-            
-            ds['relative_wind_speed_u'] = ds['10m_u_component_of_wind']
-            ds['relative_wind_speed_v'] = ds['10m_v_component_of_wind']
-                        
         elif atmosphere_source == 'era5-calculated':
             ds = self.get_atmospheric_fields_era5(dt, data_dir, calculated_fluxes=True)
         
             # Need to do this to accomodate ACE2 grid
-            ds = ds.regrid.linear(self.base_dataarray)    
-            
-        elif atmosphere_source == 'era5-ace2mimic':
-            # Combination of ERA5 fluxes with some calculated fluxes, to mimic how ACE2 is coupled
-            ds = self.get_atmospheric_fields_era5(dt, data_dir, calculated_fluxes=True)
-        
-            # Need to do this to accomodate ACE2 grid
-            ds = ds.regrid.linear(self.base_dataarray)    
-                                
+            ds = ds.regrid.linear(self.base_dataarray)                        
         elif atmosphere_source == 'gencast':
             ds = self.get_atmospheric_fields_gencast(dt, data_dir)
         elif atmosphere_source in ['ace2', 'ace2-calculated']:
@@ -698,22 +626,15 @@ class FluxCalculator:
         
         ds = ds.sel(latitude=self.latitude_vals, longitude=self.longitude_vals)
         
-        if atmosphere_source in ['era5-calculated', 'gencast', 'era5-ace2mimic']:
+        if atmosphere_source in ['era5-calculated', 'gencast']:
             ds['specific_humidity_surface'] = interpolate_surface_specific_humidity(ds)
         
-        if atmosphere_source in ['era5-calculated', 'gencast', 'ace2', 'era5-ace2mimic', 'ace2-calculated']:
+        if atmosphere_source in ['era5-calculated', 'gencast', 'ace2']:
             ds['wind_speed'] = np.sqrt(ds['10m_u_component_of_wind']**2 + ds['10m_v_component_of_wind']**2)
-            
-            if self.ocean_source == 'era5':
-                ds['relative_wind_speed_u'] = ds['10m_u_component_of_wind']
-                ds['relative_wind_speed_v'] = ds['10m_v_component_of_wind']
-                ds['relative_wind_speed_ice_u'] = ds['10m_u_component_of_wind']
-                ds['relative_wind_speed_ice_v'] = ds['10m_v_component_of_wind']
-            else:
-                ds['relative_wind_speed_u'] = ds['10m_u_component_of_wind'] - ocean_ds['ocean_current_u'].notnull()
-                ds['relative_wind_speed_v'] = ds['10m_v_component_of_wind'] - ocean_ds['ocean_current_v'].notnull()
-                ds['relative_wind_speed_ice_u'] = ds['10m_u_component_of_wind'] - ocean_ds['ice_velocity_u']
-                ds['relative_wind_speed_ice_v'] = ds['10m_v_component_of_wind'] - ocean_ds['ice_velocity_v']
+            ds['relative_wind_speed_u'] = ds['10m_u_component_of_wind'] - ocean_ds['ocean_current_u']
+            ds['relative_wind_speed_v'] = ds['10m_v_component_of_wind'] - ocean_ds['ocean_current_v']
+            ds['relative_wind_speed_ice_u'] = ds['10m_u_component_of_wind'] - ocean_ds['ice_velocity_u']
+            ds['relative_wind_speed_ice_v'] = ds['10m_v_component_of_wind'] - ocean_ds['ice_velocity_v']
 
             ds['relative_wind_speed'] = np.sqrt((ds['relative_wind_speed_u'])**2 + (ds['relative_wind_speed_v'])**2)
             ds['relative_wind_speed_ice'] = np.sqrt((ds['relative_wind_speed_ice_u'])**2 + (ds['relative_wind_speed_ice_v'])**2)
@@ -734,8 +655,7 @@ class FluxCalculator:
                         '2m_temperature',
                         'total_precipitation']
         else:
-            era5_vars = ['2m_temperature', 'total_precipitation', '10m_u_component_of_wind',
-                        '10m_v_component_of_wind']
+            era5_vars = ['2m_temperature', 'total_precipitation']
         
         surface_ds = []
         for era5_var in era5_vars:
@@ -768,7 +688,7 @@ class FluxCalculator:
         
         ds = polling2.poll(lambda: xr.load_dataset(os.path.join(data_dir, f"gencast_{dt.strftime('%Y%m%d-%H')}.nc")), 
                         ignore_exceptions=(IOError, ValueError, FileNotFoundError), 
-                        timeout=self.first_poll_timeout if self.poll_counter == 0 else self.polling_timeout,
+                        timeout=FIRST_POLL_TIMEOUT if self.poll_counter == 0 else POLLING_TIMEOUT,
                         step=0.1,
                         log=logging.ERROR).isel(time=0)
         self.poll_counter += 1
@@ -807,7 +727,7 @@ class FluxCalculator:
         logger.debug(f"Polling ACE data in {os.path.join(data_dir, f'ace2_{hour_interval}h.nc')}")
         ds = polling2.poll(lambda: xr.load_dataset(os.path.join(data_dir, f"ace2_{hour_interval}h.nc")), 
                         ignore_exceptions=(IOError, ValueError, FileNotFoundError), 
-                        timeout=self.first_poll_timeout if self.poll_counter == 0 else self.polling_timeout,
+                        timeout=FIRST_POLL_TIMEOUT if self.poll_counter == 0 else POLLING_TIMEOUT,
                         step=0.1,
                         log=logging.ERROR)
         self.poll_counter += 1
@@ -926,347 +846,679 @@ class FluxCalculator:
         res_ssst_ds['evaporation'] = res_ssst_ds['mean_surface_latent_heat_flux'] / (res_ssst_ds['latent_heat_of_vaporization']) 
         
         return res_ssst_ds
+
+
+# %%
+
+# %%
+from matplotlib.colors import ListedColormap, BoundaryNorm
+from matplotlib import pyplot as plt
+from matplotlib import colorbar, colors, gridspec
+
+import cartopy.crs as ccrs
+import cartopy.feature as cfeature
+from cartopy.feature import NaturalEarthFeature, auto_scaler, AdaptiveScaler
+
+def plot_grid_shared_axes(da_grid, 
+                          num_rows, 
+                          num_cols, 
+                          cbar_label,
+                          titles_grid,
+                          vmax, 
+                          vmin,
+                          width_height_ratio = [8,6],
+                          shrink_factor=0.7, 
+                          central_longitude=180, 
+                          wspace=0.001,
+                          cbar_height_ratio=0.02,
+                          cmap='RdBu_r', 
+                          mask=None):
+   
+    fig = plt.figure(constrained_layout=True, figsize=(shrink_factor*width_height_ratio[0]*2, shrink_factor*width_height_ratio[1]))
+
+    gs = gridspec.GridSpec(num_rows + 1, num_cols, figure=fig, 
+                        width_ratios=[1]* num_cols,
+                        height_ratios=[1] * num_rows + [0.02],
+                           wspace=wspace) 
+    plot_axs = [[fig.add_subplot(gs[m, n], projection = ccrs.PlateCarree(central_longitude=central_longitude)) for n in range(num_cols)] for m in range(num_rows)]
+
+
+    for row in range(num_rows):
+        for col in range(num_cols):
             
+            plot_da = da_grid[row][col]
+            if mask is not None:
+                plot_da = xr.where(mask, plot_da, np.nan)
+            im = plot_da.plot(ax=plot_axs[row][col], 
+                              vmax=vmax, vmin=vmin, 
+                              cmap=cmap, 
+                              add_colorbar=False, rasterized=True,
+                              transform=ccrs.PlateCarree())
 
-if __name__ == "__main__":
+            if row == num_rows - 1:
+                plot_axs[row][col].set_xticks(np.arange(-180,181,60), crs=ccrs.PlateCarree())
+                lon_formatter = cticker.LongitudeFormatter()
+                plot_axs[row][col].xaxis.set_major_formatter(lon_formatter)
+                plot_axs[row][col].set_xlabel('Longitude')
 
-    
-    parser = ArgumentParser()
-    parser.add_argument('--model-directory', type=str,
-                        help='Run directory of ocean model', required=True)
-    parser.add_argument('--router-data-directory', type=str, required=True)
-    parser.add_argument('--atmosphere-source', type=str, choices=['era5', 'era5-calculated', 
-                                                                  'gencast', 'ace2', 'ace2-calculated',
-                                                                  'era5-ace2mimic'], required=True)
-    parser.add_argument('--atmosphere-gridfile', type=str,default=None)
-    parser.add_argument('--climatology-directory', type=str, default=None)
-    parser.add_argument('--era5-directory', type=str,required=True)
-    parser.add_argument('--atmospheric-timestep-hrs', type=float, required=True,
-                        help='Timestep of atmospheric model in hours')
-    parser.add_argument('--coupling-timestep-secs', type=int, required=True,
-                        help='Timestep of coupling in seconds')
-    parser.add_argument('--ocean-source', type=str, choices=['era5', 'nemo'], required=True)
-    parser.add_argument('--deactivated-fluxes', nargs='+', default=None,
-                        help='List of fluxes to deactivate. freshwater, momentum, heat(sensible and latent heat fluxes)')
-    parser.add_argument('--no-coastal-ice-flux-masking', action="store_true",
-                        help="Whether to disable coastal ice masking")
-    parser.add_argument('--no-solid-precip', action="store_true",
-                        help="Whether to disable solid precipitation calculation")
-    parser.add_argument('--start-from-era5', action="store_true",
-                        help="Whether to use ERA5 ocean data for initial conditions")
-    parser.add_argument('--first-poll-timeout', type=int, default=20*60,
-                        help="Timeout for first poll in seconds")
-    parser.add_argument('--polling-timeout', type=int, default=10*60,
-                        help="Timeout for subsequent polls in seconds")
-    parser.add_argument('--debug', action="store_true",
-                        help="activate debugging")
-    parser.add_argument('--test-mode', action="store_true",
-                        help="activate test mode, where forcing fluxes are replaced by constant shapes")                   
-    args = parser.parse_args()
-    
-    # if args.debug:
-    #     # Use ERA5 ocean data for debugging
-    #     args.ocean_source = 'era5'
-        
-    if args.atmosphere_source == 'gencast' and args.climatology_directory is None:
-        raise ValueError("Climatology directory must be provided when using gencast source")
-    
-    print('Setting up logging', flush=True)
-    os.makedirs(os.path.join(args.model_directory, 'log'), exist_ok=True)
+            if col == 0:
+                plot_axs[row][col].set_yticks(np.arange(-90,91,30), crs=ccrs.PlateCarree())
+                lat_formatter = cticker.LatitudeFormatter()
+                plot_axs[row][col].yaxis.set_major_formatter(lat_formatter)
+                plot_axs[row][col].set_ylabel('Latitude')
 
-    # log_level = logging.DEBUG if (args.debug or args.atmosphere_source == 'era5') else logging.INFO
-    logging.basicConfig(filename=os.path.join(args.model_directory, 'log', 'router.log'), 
-                        encoding='utf-8', level=logging.INFO,
-                        format='%(asctime)s %(message)s')
+            plot_axs[row][col].set_title(titles_grid[row][col])
 
-    
-    args.atmospheric_timestep_hrs = int(args.atmospheric_timestep_hrs)
-    atmospheric_timestep_s = 3600 * args.atmospheric_timestep_hrs
-    coupling_timestep_s = args.coupling_timestep_secs # Coupling timstep in seconds, doesn't have to match the ML timestep, but they need to be multiples of each other
-    coupling_timestep_hrs = coupling_timestep_s / 3600
-    num_atmosphere_steps_per_coupling_step = atmospheric_timestep_s // coupling_timestep_s
-    
-    assert atmospheric_timestep_s % coupling_timestep_s == 0, "Atmospheric timestep must be a multiple of coupling timestep"
+    cbar_ax = fig.add_subplot(gs[row+1, :])
+    cbar = plt.colorbar(im, cax=cbar_ax, label=cbar_label, orientation='horizontal')
+    cbar.ax.tick_params(labelsize=10)
 
-    grid = xr.load_dataset(args.atmosphere_gridfile)
-    lat_points = grid['latitude'].values
-    lon_points = grid['longitude'].values
-    n_lat_points = len(lat_points)
-    n_lon_points = len(lon_points)
-    n_points = n_lat_points*n_lon_points
-    
-    logger.info('Reading namelist')
-    namelist_dict = f90nml.read(os.path.join(args.model_directory, 'namelist_cfg'))
-    
-    if namelist_dict == OrderedDict([]):
-        # In some cases all of the config is written in the ref namelist
-        namelist_dict = f90nml.read(os.path.join(args.model_directory, 'namelist_ref'))
+    return fig, plot_axs
 
-    it000 = namelist_dict['namrun']['nn_it000']
-    
-    if 'rn_rdt' in namelist_dict['namdom']:
-        rndt = namelist_dict['namdom']['rn_rdt']
-    else:
-        rndt = namelist_dict['namdom']['rn_Dt']
+# %%
+ace2_grid = xr.open_dataset("/home/ecme4254/hpcperm/ml_model_data/ace2/grid.nc")
 
-    itend = namelist_dict['namrun']['nn_itend'] # Total number of time steps that NEMO will run for
-    date0 = namelist_dict['namrun']['nn_date0']
-    sn_rcv_qsr = namelist_dict['namsbc_cpl']['sn_rcv_qsr']
-    n_coupling_steps = int(itend * rndt / coupling_timestep_s)
-    n_atmosphere_steps = int(itend * rndt / atmospheric_timestep_s)
+# %%
+import datetime
 
-    logger.info(f'Number of coupling steps: {n_coupling_steps}')
-    logger.info(f'Number of atmosphere steps: {n_atmosphere_steps}')
+base_dir = '/home/ecme4254/scratch/run_dir/n3.6_ace2_1951_control_compressed_19510101-19610101_m0'
+start_datetime=datetime.datetime(1951,1,1)
+coupling_timestep_hrs=6
+coupling_timestep_s=6*3600
 
-    if args.debug:
-        n_coupling_steps = 2  # For debugging, just run for 5 coupling steps
-
-    if args.atmosphere_source.startswith('era5'):
-        
-        atmosphere_directory = args.era5_directory
-    else:
-        atmosphere_directory = args.router_data_directory
-        if args.ocean_source != 'era5':
-            os.makedirs(args.router_data_directory, exist_ok=True)
-    
-    start_datetime = datetime.datetime.strptime(str(date0), '%Y%m%d')
-    all_datetimes = [pd.Timestamp(start_datetime + datetime.timedelta(seconds=coupling_timestep_s * n)) for n in range(n_coupling_steps)]
-
-    
-    logger.info('Starting ML OASIS component')
-
-    # Mocking for debugging
-    if (args.ocean_source == 'era5') or args.debug:
-        pyoasis = Mock()
-        OASIS= Mock()
-        OASIS.OUT = 'out'
-        OASIS.OUT = 'in'
-        mock_component = MagicMock(return_value=None)
-        mock_component.enddef = MagicMock(return_value=None)
-        pyoasis.Component = MagicMock(return_value=mock_component)
-
-        mock_var = MagicMock(return_value=None)
-        mock_var.get = MagicMock(return_value=None)
-        mock_var.put = MagicMock(return_value=None)
-
-        pyoasis.Var = MagicMock(return_value=mock_var)
-        pyoasis.Component.enddef = MagicMock(return_value=None)
-        pyoasis.SerialPartition = MagicMock(return_value='mock_partition')
-    else:
-        # Since pyoasis can't be installed without Oasis being compiled, for test sytems we mock the import
-        import pyoasis
-        from pyoasis import OASIS
-
-
-    # Initialize OASIS
-    logger.info('Initializing OASIS')
-    comp = pyoasis.Component(args.atmosphere_source)
-    logger.info(comp)
-
-    logger.info('Initialising partition')
-
-    partition = pyoasis.BoxPartition(0, n_lon_points, n_lat_points, n_lon_points)
-    logger.info(partition)
-
-    send_variables = {}
-    for var in ATM2OCE_VARS:
-        send_variables[var] = pyoasis.Var(var, partition, OASIS.OUT)
-        logger.debug(send_variables[var])
-
-    recv_variables = {}
-    for var in OCE2ATM_VARS:
-        recv_variables[var] = pyoasis.Var(var, partition, OASIS.IN)
-        logger.debug(recv_variables[var])
-
-    logger.debug('End of definition')
-    comp.enddef()
-    
-    if args.atmosphere_source in ['gencast']:
-
-        logger.info("initialising climatology data")
-
-        hour_vals = [td.hour for td in all_datetimes]
-        day_of_year_vals = sorted(set([td.dayofyear for td in all_datetimes]))
-        
-        # Latent and sensible heat fluxes, for the fluxes over ice (from Weatherbench2)
-        sensible_heat_flux_fps = [os.path.join(args.climatology_directory, 'mean_surface_sensible_heat_flux', f"era5_clim_mean_surface_sensible_heat_flux_{doy}.nc") for doy in day_of_year_vals]
-        msshf_da = xr.open_mfdataset(sensible_heat_flux_fps, combine='nested', concat_dim='dayofyear')['mean_surface_sensible_heat_flux'].compute()
-        msshf_da.name = 'mean_surface_sensible_heat_flux_clim'
-
-        latent_heat_flux_fps = [os.path.join(args.climatology_directory, 'mean_surface_latent_heat_flux', f"era5_clim_mean_surface_latent_heat_flux_{doy}.nc") for doy in day_of_year_vals]
-        mslhf_da = xr.open_mfdataset(latent_heat_flux_fps, combine='nested', concat_dim='dayofyear')['mean_surface_latent_heat_flux'].compute()
-        mslhf_da.name = 'mean_surface_latent_heat_flux_clim'
-
-        # Climatology data for long wave and short wave downward radiation, calculated from ERA5 data
-        full_lw_clim_da = xr.load_dataarray(os.path.join(args.climatology_directory, f"mean_mean_surface_downward_long_wave_radiation_flux_1989-01-01__2009-12-31{'_debug' if args.debug else ''}.nc")).sel(dayofyear=day_of_year_vals)
-        full_sw_clim_da = xr.load_dataarray(os.path.join(args.climatology_directory, f"mean_mean_surface_downward_short_wave_radiation_flux_1989-01-01__2009-12-31{'_debug' if args.debug else ''}.nc")).sel(dayofyear=day_of_year_vals)
-
-        # lw_clim_da = xr.concat([full_lw_clim_da.sel(dayofyear=day_of_year_vals[n], hour=hour_vals[n]).expand_dims(dim={'time': [all_datetimes[n]]}) for n in range(len(all_datetimes))], dim='time').drop_vars(['hour', 'dayofyear'])
-        # sw_clim_da = xr.concat([full_sw_clim_da.sel(dayofyear=day_of_year_vals[n], hour=hour_vals[n]).expand_dims(dim={'time': [all_datetimes[n]]}) for n in range(len(all_datetimes))], dim='time').drop_vars(['hour', 'dayofyear'])
-        
-        
-        clim_ds = xr.merge([full_lw_clim_da, full_sw_clim_da, msshf_da, mslhf_da])
-    
-    else:
-        clim_ds = None
-        
-    
-    flux_calculator = FluxCalculator(
-                    atmosphere_source=args.atmosphere_source,
-                    era5_directory=args.era5_directory,
-                    atmosphere_directory=args.router_data_directory,
+flux_calculator = FluxCalculator(
+                    atmosphere_source='ace2',
+                    era5_directory='/home/ecme4254/scratch/era5',
+                    atmosphere_directory=base_dir,
                     start_datetime=start_datetime,
                     coupling_timestep_hrs=coupling_timestep_hrs,
-                    atmospheric_timestep_hrs=args.atmospheric_timestep_hrs,
-                    climatology_ds=clim_ds,
-                    ocean_source=args.ocean_source,
-                    latitude_vals=lat_points,
-                    longitude_vals=lon_points,
-                    start_from_era5=args.start_from_era5,
-                    coastal_ice_flux_masking=not args.no_coastal_ice_flux_masking,
-                    infer_solid_precipitation=not args.no_solid_precip,
-                    first_poll_timeout=args.first_poll_timeout,
-                    polling_timeout=args.polling_timeout
+                    atmospheric_timestep_hrs=6,
+                    climatology_ds=None,
+                    ocean_source='nemo',
+                    latitude_vals=ace2_grid['latitude'].values,
+                    longitude_vals=ace2_grid['longitude'].values
                 )
 
-    for n in range(n_coupling_steps + 1):
+# %%
+n=1
+dt = pd.Timestamp(start_datetime + datetime.timedelta(seconds = coupling_timestep_s * n))
+date_str = f'{int((coupling_timestep_s * n) / 3600)}h'
+atmosphere_source='ace2'
 
-        dt = pd.Timestamp(start_datetime + datetime.timedelta(seconds = coupling_timestep_s * n))
+ocean_ds = xr.open_dataset(os.path.join(base_dir, 'router', f"oce2atm_{date_str}_ace2_nemo.nc"))
 
-        logger.info(10*'*')
-        logger.info(f"Processing timestep {n}, datetime={dt.strftime('%Y-%m-%d %H:%M:%S')}")
+atmosphere_ds = flux_calculator.create_atmosphere_ds(dt, 
+                             os.path.join(base_dir, 'router'),
+                             ocean_ds,
+                             'ace2')
 
-        logger.info(10*'*')
-        logger.info('Getting received fields')
-        start = time.time()
+# %%
+era5_ds = []
+for var in ['2m_temperature', 'sea_ice_cover', 'mean_surface_latent_heat_flux', 'mean_surface_sensible_heat_flux', 'skin_temperature', 'mean_surface_net_short_wave_radiation_flux']:
+    era5_da = xr.load_dataarray(f'/home/ecme4254/hpcperm/era5/surface/{var}/era5_{var}_19510101.nc')
+    era5_da.name = var
+    era5_ds.append(era5_da)
+era5_ds = xr.merge(era5_ds)
+era5_ds = era5_ds.regrid.linear(atmosphere_ds)
 
-        da_list = []
-        for varname, var in recv_variables.items():
-            recv_data = pyoasis.asarray(np.zeros((n_lon_points, n_lat_points)))
-            var.get(n * coupling_timestep_s, recv_data)
+era5_ds = era5_ds.rename({'sea_ice_cover': 'sea_ice_fraction'})
+
+# %%
+# Empirical estimation of bulk transfer coefficient
+deltemp = air_density * specific_heat_capacity_air*atmosphere_ds['relative_wind_speed_ice'].isel(time=0)*(era5_ds['2m_temperature'].isel(time=0) - era5_ds['skin_temperature'].isel(time=1))
+y = era5_ds['mean_surface_sensible_heat_flux'].isel(time=1)
+deltemp_ice = xr.where(ice_mask, deltemp, np.nan).values.flatten()
+y_ice = xr.where(ice_mask, y, np.nan).values.flatten()
+plt.scatter(deltemp_ice[~np.isnan(deltemp_ice)], y_ice[~np.isnan(deltemp_ice)])
+
+# %%
+
+# %%
+# Empirical relationship of ERA5 SHF with CORE SHF
+y = era5_ds['mean_surface_sensible_heat_flux'].isel(time=1).values.flatten()
+# y_ice = xr.where(ice_mask, y, np.nan).values.flatten()
+
+x = non_solar_flux_ds['sensible_heat_flux_ice'].values.flatten()
+
+plt.scatter(x[~np.isnan(x)], y[~np.isnan(x)])
+
+# %%
+delta_x = 2e5
+delta_y = 400
+cice_empirical = delta_y/delta_x
+
+# %%
+cice_empirical
+
+# %%
+air_density * specific_heat_capacity_air * C_ice * atmosphere_ds['relative_wind_speed_ice']
+
+# %%
+calculated_flux_ds = flux_calculator.calculate_fluxes(atmosphere_ds,
+                                                ocean_ds,
+                                                max_iterations=50)
             
-            
-            da = xr.DataArray(
-                name=varname,
-                data=recv_data,
-                dims=["longitude", "latitude"],
-                coords=dict(
-                    latitude=lat_points,
-                    longitude=lon_points,
-                ),
-                attrs=dict(
-                    description="Variable.",
-                    units="",
-                ),
-            )
-            da_list.append(da)
+flux_ds = xr.merge([calculated_flux_ds[['instantaneous_eastward_turbulent_surface_stress', 
+                                        'instantaneous_northward_turbulent_surface_stress', 
+                                        'latent_heat_of_vaporization']], atmosphere_ds])  
 
-            logger.info(f'Max val for {varname}: {recv_data.max()}')
-        
-        logger.info(f'getting received fields took {time.time() - start}s')
-        
-        if n==0:
-            restart_ocean_fp = os.path.join(args.router_data_directory, f"restart_oce2atm_0h_{args.atmosphere_source}_{args.ocean_source}{'_debug' if args.debug else ''}.nc")
-            
-            if os.path.exists(restart_ocean_fp):
-                ocean_ds = xr.load_dataset(restart_ocean_fp).sel(latitude=lat_points, longitude=lon_points)
-            else:
-                ocean_ds = get_era5_ocean_data(dt, 
-                                           args.era5_directory, 
-                                           atmosphere_grid=grid).sel(latitude=lat_points, longitude=lon_points)
+# ACE2 sign convention for these fluxes is opposite to ECMWF convention of positive downward 
+flux_ds['mean_surface_latent_heat_flux'] = -1 * flux_ds['mean_surface_latent_heat_flux']
+flux_ds['mean_surface_sensible_heat_flux'] = -1 * flux_ds['mean_surface_sensible_heat_flux']
+
+# Since latent heat of vaporization is not provided by ACE2, we need to use these formulae
+# for evaporation over ice
+flux_ds['evaporation'] = flux_ds['mean_surface_latent_heat_flux'] / (flux_ds['latent_heat_of_vaporization'])
+
+## Replacing ACE2 fluxes over ice with calculated fluxes over ice 
+non_solar_flux_ds = non_solar_fluxes_ice(atmosphere_ds, ocean_ds, clim_ds=None, source=atmosphere_source)
+# flux_ds = xr.merge([flux_ds, non_solar_flux_ds])
                 
-        elif args.ocean_source == 'era5' or args.debug:
-            # Note that NEMO just gives 0s in the first timestep, so we just use ERA5
-            #TODO: create interpolated SST from NEMO restart files
-            logger.debug('Getting ERA5 ocean data')
-            ocean_ds = get_era5_ocean_data(dt, 
-                                           args.era5_directory, 
-                                           atmosphere_grid=grid).sel(latitude=lat_points, longitude=lon_points)
-        else:
-            ocean_ds = xr.merge(da_list).rename({'A_SST': 'sea_surface_temperature',
-                    'A_Ice_temp': 'sea_ice_temperature',
-                    'A_Ice_albedo': 'ice_albedo',
-                    'A_Ice_frac': 'sea_ice_fraction',
-                    'A_Ice_thickness': 'sea_ice_thickness',
-                    'A_Snow_thickness': 'sea_ice_snow_thickness',
-                    'A_OceCurrent_u': 'ocean_current_u',
-                    'A_OceCurrent_v': 'ocean_current_v',
-                    'A_IceVelocity_u': 'ice_velocity_u',
-                    'A_IceVelocity_v': 'ice_velocity_v'}) 
-        
-        # Remove 0 values, as this confuses AirSeaFluxCode
-        ocean_ds['sea_surface_temperature'] = xr.where(ocean_ds['sea_surface_temperature'] == 0, np.nan, ocean_ds['sea_surface_temperature'])
-        
-        if args.atmosphere_source in ['ace2', 'ace2-calculated']:
-            date_str = f'{int((coupling_timestep_s * n) / 3600)}h'  # ACE2 files are named by hours since start
-        else:
-            date_str = dt.strftime('%Y%m%d-%H')
-        output_fp = os.path.join(args.router_data_directory, f"oce2atm_{date_str}_{args.atmosphere_source}_{args.ocean_source}{'_debug' if args.debug else ''}.nc")
+flux_ds['evaporation_ice'] = non_solar_flux_ds['latent_heat_flux_ice'] / Ls
+# flux_ds['evaporation_ice'] = flux_ds['mean_surface_latent_heat_flux'] / Ls
 
-        if not args.test_mode:
-            if 'time' not in ocean_ds.dims:
-                ocean_ds.expand_dims({'time': [dt]}).to_netcdf(output_fp)
-            else:
-                ocean_ds.to_netcdf(output_fp)
-                ocean_ds = ocean_ds.isel(time=0)
+# Following the ECMWF convention of positive downwards
+flux_ds['mean_surface_net_long_wave_radiation_flux'] = flux_ds['mean_surface_downward_long_wave_radiation_flux'] - flux_ds['mean_surface_upward_long_wave_radiation_flux']
+flux_ds['mean_surface_net_short_wave_radiation_flux'] = flux_ds['mean_surface_downward_short_wave_radiation_flux'] - flux_ds['mean_surface_upward_short_wave_radiation_flux']
 
-        if n == n_coupling_steps:
-            # No need to calculate fluxes for the last timestep, since they won't be used
-            break
-        
-        logger.info(10*'*')
-        logger.info('Sending fields')
-        start = time.time()
-        send_data_ds = []
-        
-        flux_ds = flux_calculator(dt, ocean_ds, test_mode=args.test_mode)
+# Since ACE2 has ice in the model, we assume these fluxes are correct over ice as well.
+flux_ds['net_long_wave_radiation_flux_ice'] = flux_ds['mean_surface_net_long_wave_radiation_flux'].copy()
+flux_ds['solar_flux_over_ice']  = flux_ds['mean_surface_net_short_wave_radiation_flux'].copy()
+     
+# flux_ds['sensible_heat_flux_ice'] = flux_ds['mean_surface_sensible_heat_flux'].copy()
+# flux_ds['latent_heat_flux_ice'] = flux_ds['mean_surface_latent_heat_flux'].copy()
+flux_ds['sensible_heat_flux_ice'] = non_solar_flux_ds['sensible_heat_flux_ice']
+flux_ds['latent_heat_flux_ice'] = non_solar_flux_ds['latent_heat_flux_ice']
 
-        for varname, var in send_variables.items():
+flux_ds['momentum_flux_over_ice_x'], flux_ds['momentum_flux_over_ice_y'] = momentum_flux_over_ice(atmosphere_ds)
 
-            send_data_da = flux_ds[varname]
-            
-            if args.deactivated_fluxes is not None:
-                if ('momentum' in args.deactivated_fluxes and varname in ['A_TauX_ice', 'A_TauX_oce', 'A_TauY_ice', 'A_TauY_oce']) or \
-                    ('heat' in args.deactivated_fluxes and varname in ['A_Qns_ice', 'A_Qns_oce', 'A_Qs_oce', 'A_Qs_ice', 'A_dQns_dT']) or \
-                        ('freshwater' in args.deactivated_fluxes and varname in ['A_Evap_ice', 'A_Evap_total', 'A_Precip_liquid', 'A_Precip_solid']) or \
-                            ('freshwater_ice' in args.deactivated_fluxes and varname in ['A_Evap_ice', 'A_Precip_liquid', 'A_Precip_solid']) or \
-                                ('heat_ice' in args.deactivated_fluxes and varname in ['A_Qns_ice', 'A_Qs_ice']) or 'all' in args.deactivated_fluxes:
-                    send_data_da = 1e-6 * send_data_da
-                    logger.info(f'Deactivated {varname}')
-                    
-            # Coordinates must be ordered correctly, otherwise the data will be mangled
-            send_data_da = send_data_da.transpose('longitude', 'latitude')
+# %%
+atmosphere_ds['mean_surface_net_short_wave_radiation_flux'] = atmosphere_ds['mean_surface_downward_short_wave_radiation_flux'] - atmosphere_ds['mean_surface_upward_short_wave_radiation_flux']
 
-            logger.info(f'Length of {varname}: {send_data_da.values.size}')
-            logger.info(f'Max val for {varname}: {send_data_da.max().item()}')
-            
-            send_data = pyoasis.asarray(send_data_da.values)
-            var.put(n * coupling_timestep_s, send_data)
-            logger.info(f'Sent {varname}')
-            
-        logger.info(f'sending fields took {time.time() - start}s')
-        if not args.test_mode:
-            output_vars = list(flux_ds.data_vars)
-            flux_ds[output_vars].assign_coords(time=[dt]).to_netcdf(os.path.join(args.router_data_directory, f"atm2oce_{dt.strftime('%Y%m%d-%H')}_{args.atmosphere_source}_{args.ocean_source}{'_debug' if args.debug else ''}.nc"))
-        logger.debug(f'Wrote file')
+# %%
+ranges = {'latent_heat_flux_ice':[-400,400], 'sensible_heat_flux_ice': [-300,300],
+         'mean_surface_sensible_heat_flux': [-600,600],
+         'mean_surface_latent_heat_flux': [-800,800],
+          'mean_surface_net_long_wave_radiation_flux': [-150,150],
+          'mean_surface_net_short_wave_radiation_flux': [0,1000],
+          'instantaneous_eastward_turbulent_surface_stress': [-1, 1],
+          'instantaneous_northward_turbulent_surface_stress': [-1,1],
+         'evaporation': [-0.0003, 0.0003]
+           }
+
+# %%
+sea_mask = ~np.isnan(ocean_ds['sea_surface_temperature'].isel(time=0))
+ice_mask = ocean_ds['sea_ice_fraction'].isel(time=0) > 0.05
+
+# %%
+import matplotlib.pyplot as plt
+import cartopy.mpl.ticker as cticker
+
+plot_vars = ['mean_surface_latent_heat_flux', 'mean_surface_sensible_heat_flux'] 
+             # 'mean_surface_net_short_wave_radiation_flux']
+nrows = len(plot_vars)
+ncols=2
+
+
+                                  
+for n, v in enumerate(plot_vars):
+
+    da_dict = {'ACE2': xr.where(ice_mask,atmosphere_ds[v],np.nan),
+               # 'ERA5': xr.where(sea_mask,era5_ds[v].isel(time=1),np.nan),
+               'Flux': xr.where(ice_mask,core_ice_flux_ds[v].isel(time=0),np.nan),
+                  # 'ECE3': -1*ece3_ds[v].rename({'lat':'latitude', 'lon': 'longitude'}).isel(time=0)
+              }
+
+
+    da_dict = {k: v.transpose('latitude', 'longitude') for k,v in da_dict.items()}
         
-        time.sleep(0.05)
+
+    fig, axs = plot_grid_shared_axes(da_grid= [list(da_dict.values())], 
+                              num_rows=1, 
+                              num_cols=len(da_dict.keys()), 
+                              titles_grid=[[item.replace('ace2', 'ACE2').replace('era5', 'ERA5') for item in da_dict.keys()]],
+                              cbar_label=v,
+                              vmin=-200, 
+                              vmax=200,
+                              shrink_factor=0.7, 
+                              central_longitude=180, 
+                              cmap='RdBu_r', 
+                              mask=None)
+
+# %%
+import matplotlib.pyplot as plt
+import cartopy.mpl.ticker as cticker
+
+plot_vars = ['mean_surface_downward_short_wave_radiation_flux', 'mean_surface_upward_short_wave_radiation_flux',
+            'mean_surface_downward_long_wave_radiation_flux', 'mean_surface_upward_long_wave_radiation_flux']
+nrows = len(plot_vars)
+ncols=2
+
+
+                                  
+for n, v in enumerate(plot_vars):
+
+    da_dict = {'ACE2': xr.where(sea_mask,atmosphere_ds[v],np.nan),
+                  'ECE3': xr.where(sea_mask,ece3_ds[v].isel(time=0),np.nan)
+              }
+
+
+    da_dict = {k: v.transpose('latitude', 'longitude') for k,v in da_dict.items()}
         
-    logger.info(f'Finished processing {n_coupling_steps} timesteps')
-    logger.info(f'Chacking NEMO timestep has hit {itend}')
+
+    fig, axs = plot_grid_shared_axes(da_grid= [list(da_dict.values())], 
+                              num_rows=1, 
+                              num_cols=len(da_dict.keys()), 
+                              titles_grid=[[item.replace('ace2', 'ACE2').replace('era5', 'ERA5') for item in da_dict.keys()]],
+                              cbar_label=v,
+                              vmin=None, 
+                              vmax=None,
+                              shrink_factor=0.7, 
+                              central_longitude=180, 
+                              cmap='RdBu_r', 
+                              mask=None)
+
+# %%
+# Compare to restart fluxes
+
+# %%
+
+# %%
+
+ece3_ds = xr.merge([xr.load_dataset(f'/home/ecme4254/scratch/ece3_cmip6_data_download/{s}/{s}_Amon_EC-Earth3P_control-1950_r1i1p2f1_gr_195101-195112.nc') for s in ['hfss', 'hfls','rsus','rsds', 'rlus', 'rlds']])
+ece3_ds = ece3_ds.rename({'hfss': 'mean_surface_sensible_heat_flux', 
+                          'lat': 'latitude', 'lon': 'longitude',
+                          'hfls': 'mean_surface_latent_heat_flux',
+                           'rsus': 'mean_surface_downward_short_wave_radiation_flux',
+                           'rsds': 'mean_surface_upward_short_wave_radiation_flux',
+                         'rlus': 'mean_surface_downward_long_wave_radiation_flux',
+                           'rlds': 'mean_surface_upward_long_wave_radiation_flux'})
+
+ece3_ocean_ds = xr.merge([xr.load_dataset(f'/home/ecme4254/scratch/ece3_cmip6_data_download/{s}/{s}_SImon_EC-Earth3P_control-1950_r1i1p2f1_gn_195101-195112.nc') for s in ['siconc']])
+ece3_ocean_ds['siconc'] = ece3_ocean_ds['siconc']/100.0
+ece3_ocean_ds = ece3_ocean_ds.rename({'siconc': 'sea_ice_fraction', 
+                          })
+
+
+# %%
+import xesmf as xe
+regridder_ece3_ocean = xe.Regridder(ece3_ocean_ds['sea_ice_fraction'].isel(time=0), 
+                         atmosphere_ds.isel(time=0)['2m_temperature'], 
+                         'bilinear',
+                         ignore_degenerate=True, 
+                         reuse_weights=False, 
+                         periodic=True, 
+                         filename='weights_ece3.nc')
+
+regridder_ece3_atm = xe.Regridder(ece3_ds['mean_surface_sensible_heat_flux'].isel(time=0), 
+                         atmosphere_ds.isel(time=0)['2m_temperature'], 
+                         'bilinear',
+                         ignore_degenerate=True, 
+                         reuse_weights=False, 
+                         periodic=True, 
+                         filename='weights_ece3.nc')
+
+# %%
+# Ocean variables require regridding
+ece3_ocean_ds = regridder_ece3_ocean(ece3_ocean_ds)
+ece3_ds = regridder_ece3_atm(ece3_ds)
+
+ece3_ds = xr.merge([ece3_ds, ece3_ocean_ds])
+# ece3_ds = convert_dts_to_first_of_month(ece3_ds)
+
+# ece3_ds = ece3_ds.rename(ece3_var_lookup)
+
+# %%
+# Load restarts
+restart_ice = xr.load_dataset('/perm/ecme4254/ece3data/nemo/restart/ORCA1/19510101/restart_ice.nc')
+
+# %%
+non_solar_flux_ds = non_solar_fluxes_ice(atmosphere_ds, ocean_ds, clim_ds=None, source='ace2')
+
+
+# %%
+quantile_vals = np.linspace(0,1,1000)
+
+tmp_ice_mask = ocean_ds['sea_ice_fraction'].isel(time=0) > 0.1
+tmp_era5_ice_mask = era5_ds.isel(time=1)['sea_ice_fraction'] > 0.1
+
+both_ice_mask = np.logical_and(tmp_era5_ice_mask, tmp_ice_mask)
+
+for v in ['sensible', 'latent']:
     
-    # Wait until nemo time step hits the correct point
-    def _nemo_timestep(model_directory, itend):
-        with open(os.path.join(model_directory, 'time.step'), 'r') as f:
-            ts = f.read().strip()
-        if ts == str(itend):
-            return True
-        return False
+    core_vals = xr.where(both_ice_mask, non_solar_flux_ds[f'{v}_heat_flux_ice'].isel(time=0), np.nan).values.flatten()
+    era5_vals = xr.where(both_ice_mask, era5_ds.isel(time=1)[f'mean_surface_{v}_heat_flux'], np.nan).values.flatten()
     
-    polling2.poll(lambda: _nemo_timestep(args.model_directory, itend), 
-                        ignore_exceptions=(IOError, ValueError, FileNotFoundError), 
-                        timeout=args.polling_timeout,
-                        step=0.1,
-                        log=logging.ERROR)
+    non_null_idxs = ~np.isnan(core_vals)
+    core_vals = core_vals[non_null_idxs]
+
+    era5_vals = era5_vals[non_null_idxs]
+
+    output_fp = f'/home/ecme4254/hpcperm/ml_model_data/quantile_mapping/{v}_heat_flux_quantiles_era5.pkl'
+    print(output_fp)
+    with open(output_fp, 'wb+') as ofh:
+        pickle.dump({'core': [np.quantile(core_vals, q) for q in quantile_vals], 
+                     'era5':[np.quantile(era5_vals, q) for q in quantile_vals]}, ofh)
     
-    time.sleep(30)  # Wait for a bit before finalising
+
+
+# %%
+shf_da = non_solar_flux_ds['sensible_heat_flux_ice'].copy()
+sensible_heat_flux_quantiles = pickle.load(open(f'/home/ecme4254/hpcperm/ml_model_data/quantile_mapping/sensible_heat_flux_quantiles_era5.pkl', 'rb'))
+shf_da.values = np.interp(non_solar_flux_ds['sensible_heat_flux_ice'].values, 
+                                                              sensible_heat_flux_quantiles['core'], 
+                                                              sensible_heat_flux_quantiles['era5'])
+
+# %%
+np.max(sensible_heat_flux_quantiles['core'])
+
+# %%
+numerator = (sensible_heat_flux_quantiles['era5'][-1] - sensible_heat_flux_quantiles['era5'][-4])
+denominator = (sensible_heat_flux_quantiles['core'][-1] - sensible_heat_flux_quantiles['core'][-4])
+positive_uplift_gradient = numerator / denominator
+
+numerator = (sensible_heat_flux_quantiles['era5'][4] - sensible_heat_flux_quantiles['era5'][0])
+denominator = (sensible_heat_flux_quantiles['core'][4] - sensible_heat_flux_quantiles['core'][0])
+negative_uplift_gradient = numerator / denominator
+
+shf_da = xr.where(non_solar_flux_ds['sensible_heat_flux_ice'] > np.max(sensible_heat_flux_quantiles['core']), positive_uplift_gradient*non_solar_flux_ds['sensible_heat_flux_ice'], shf_da)
+shf_da = xr.where(non_solar_flux_ds['sensible_heat_flux_ice'] < np.min(sensible_heat_flux_quantiles['core']), negative_uplift_gradient*non_solar_flux_ds['sensible_heat_flux_ice'], shf_da)
+
+
+# %%
+negative_uplift_gradient
+
+# %%
+positive_uplift_gradient
+
+# %%
+np.max(non_solar_flux_ds['sensible_heat_flux_ice'].values)
+
+# %%
+shf_da = xr.where(non_solar_flux_ds['sensible_heat_flux_ice'] > np.max(sensible_heat_flux_quantiles['core']), positive_uplift_gradient*non_solar_flux_ds['sensible_heat_flux_ice'], shf_da)
+shf_da = xr.where(non_solar_flux_ds['sensible_heat_flux_ice'] < np.min(sensible_heat_flux_quantiles['core']), negative_uplift_gradient*non_solar_flux_ds['sensible_heat_flux_ice'], shf_da)
+
+
+
+# %%
+xr.where(non_solar_flux_ds['sensible_heat_flux_ice'] > np.max(sensible_heat_flux_quantiles['core']), positive_uplift_gradient* non_solar_flux_ds['sensible_heat_flux_ice'], np.nan )
+
+
+
+
+# %%
+
+flux_type='sensible'
+
+loaded_quantiles = pickle.load(open(f'/home/ecme4254/hpcperm/ml_model_data/quantile_mapping/{flux_type}_heat_flux_quantiles_era5.pkl', 'rb'))
+fig, ax = plt.subplots(1,1)
+ax.scatter(loaded_quantiles['core'], loaded_quantiles['era5'])
+
+
+# %%
+# core_ice_flux_ds = xr.merge([solar_flux_over_ice(atmosphere_ds, ocean_ds), non_solar_flux_ds['sensible_heat_flux_ice'], non_solar_flux_ds['latent_heat_flux_ice']])
+quantile_vals = np.linspace(0,1,1000)
+
+# ace2_vals = non_solar_flux_ds['sensible_heat_flux_ice'].values.flatten()
+core_val_list = {'sensible': [], 'latent': []}
+ece3_val_list  = {'sensible': [], 'latent': []}
+for month in range(1,13):
+
+    atm2oce_ds = xr.load_dataset(f"/home/ecme4254/hpcperm/model_runs/n3.6_ace2_1951_control_compressed_19510101-20210101_m2/atm2oce_MS_ace2_nemo_1951{month:02d}.nc").isel(time=0)
+    oce2atm_ds = xr.load_dataset(f"/home/ecme4254/hpcperm/model_runs/n3.6_ace2_1951_control_compressed_19510101-20210101_m2/oce2atm_MS_ace2_nemo_1951{month:02d}.nc").isel(time=0)
+    tmp_ice_mask = oce2atm_ds['sea_ice_fraction'] > 0.1
+    tmp_ece3_ice_mask = ece3_ds.isel(time=month-1)['sea_ice_fraction'] > 0.1
+    
+    both_ice_mask = np.logical_and(tmp_ece3_ice_mask, tmp_ice_mask)
+
+    for v in ['sensible', 'latent']:
+        
+        core_vals = xr.where(both_ice_mask, atm2oce_ds[f'{v}_heat_flux_ice'], np.nan).values.flatten()
+        ece3_vals = xr.where(both_ice_mask, ece3_ds.isel(time=month-1)[f'mean_surface_{v}_heat_flux'], np.nan).values.flatten()
+        
+        non_null_idxs = ~np.isnan(core_vals)
+        core_vals = core_vals[non_null_idxs]
+
+        # Note we have to reverse signs of the ECE fluxes since they are defined in the opposite direction
+        ece3_vals = (-1)*ece3_vals[non_null_idxs]
+
+        core_val_list[v] += list(core_vals)
+        ece3_val_list[v] += list(ece3_vals)
+
+        output_fp = f'/home/ecme4254/hpcperm/ml_model_data/quantile_mapping/{v}_heat_flux_quantiles_month{month:02d}.pkl'
+        print(output_fp)
+        with open(output_fp, 'wb+') as ofh:
+            pickle.dump({'core': [np.quantile(core_vals, q) for q in quantile_vals], 
+                         'ece3':[np.quantile(ece3_vals, q) for q in quantile_vals]}, ofh)
+        
+core_quantiles = {k: [np.quantile(core_val_list[k], q) for q in quantile_vals] for k in ['sensible', 'latent']}
+ece3_quantiles = {k: [np.quantile(ece3_val_list[k], q) for q in quantile_vals] for k in ['sensible', 'latent']}
+
+for k in ['sensible', 'latent']:
+    output_fp = f'/home/ecme4254/hpcperm/ml_model_data/quantile_mapping/{k}_heat_flux_quantiles.pkl'
+    print(output_fp)
+    with open(output_fp, 'wb+') as ofh:
+        pickle.dump({'core': core_quantiles[k], 'ece3': ece3_quantiles[k]}, ofh)
+
+
+# %%
+
+flux_type='sensible'
+
+loaded_quantiles = pickle.load(open(f'/home/ecme4254/hpcperm/ml_model_data/quantile_mapping/{flux_type}_heat_flux_quantiles_month01.pkl', 'rb'))
+fig, ax = plt.subplots(1,1)
+ax.scatter(loaded_quantiles['core'], loaded_quantiles['ece3'])
+
+loaded_quantiles = pickle.load(open(f'/home/ecme4254/hpcperm/ml_model_data/quantile_mapping/{flux_type}_heat_flux_quantiles.pkl', 'rb'))
+fig, ax = plt.subplots(1,1)
+ax.scatter(loaded_quantiles['core'], loaded_quantiles['ece3'])
+
+# %%
+fig, ax = plt.subplots(1,1)
+
+ax.scatter(core_quantiles['latent'], ece3_quantiles['latent'])
+
+# %%
+# ace2_vals = non_solar_flux_ds['sensible_heat_flux_ice'].values.flatten()
+core_vals = xr.where(ice_mask, core_ice_flux_ds['short_wave_radiation_flux_ice'], np.nan).values.flatten()
+ece3_vals = xr.where(ice_mask, ece3_ds['mean_surface_latent_heat_flux'], np.nan).isel(time=0).values.flatten()
+
+non_null_idxs = ~np.isnan(core_vals)
+core_vals = core_vals[non_null_idxs]
+era5_vals = era5_vals[non_null_idxs]
+ece3_vals = (-1)*ece3_vals[non_null_idxs]
+
+core_quantiles = [np.quantile(core_vals, q) for q in quantile_vals]
+ece3_quantiles = [np.quantile(ece3_vals, q) for q in quantile_vals]
+    
+# non_solar_flux_ds['sensible_heat_flux_ice_corrected'] = non_solar_flux_ds['sensible_heat_flux_ice'].copy()
+core_ice_flux_ds['latent_heat_flux_ice'].values = np.interp(non_solar_flux_ds['latent_heat_flux_ice'].values, core_quantiles, ece3_quantiles, right=np.nan)
+
+core_ice_flux_ds = core_ice_flux_ds.rename({'latent_heat_flux_ice': 'mean_surface_latent_heat_flux'})
+
+fig, ax = plt.subplots(1,1)
+
+ax.scatter(core_quantiles, ece3_quantiles)
+
+# %%
+# ace2_series = pd.Series(ace2_vals)
+core_series = pd.Series(core_vals)
+era5_series = pd.Series(era5_vals)
+ece3_series = pd.Series(ece3_vals)
+
+# %%
+
+
+
+
+
+# %%
+quantile_vals = np.linspace(0,1,1000)
+
+core_quantiles = [np.quantile(core_vals, q) for q in quantile_vals]
+ece3_quantiles = [np.quantile(ece3_vals, q) for q in quantile_vals]
+
+fig, ax = plt.subplots(1,1)
+
+ax.scatter(core_quantiles, ece3_quantiles)
+
+# %%
+core_ice_flux_ds = xr.merge([solar_flux_over_ice(atmosphere_ds, ocean_ds), non_solar_flux_ds['sensible_heat_flux_ice'], non_solar_flux_ds['latent_heat_flux_ice']])
+
+# non_solar_flux_ds['sensible_heat_flux_ice_corrected'] = non_solar_flux_ds['sensible_heat_flux_ice'].copy()
+core_ice_flux_ds['sensible_heat_flux_ice'].values = np.interp(non_solar_flux_ds['sensible_heat_flux_ice'].values, core_quantiles, ece3_quantiles, right=np.nan)
+
+core_ice_flux_ds = core_ice_flux_ds.rename({'sensible_heat_flux_ice': 'mean_surface_sensible_heat_flux'})
+
+
+# %%
+import cartopy.mpl.ticker as cticker
+
+plot_vars = [ 'mean_surface_sensible_heat_flux', 'mean_surface_latent_heat_flux']
+nrows = len(plot_vars)
+ncols=2
+
+
+                                  
+for n, v in enumerate(plot_vars):
+
+    da_dict = {'ACE2': xr.where(sea_mask,atmosphere_ds[v],np.nan),
+               'ERA5': xr.where(sea_mask,era5_ds[v].isel(time=1),np.nan),
+               'Flux': xr.where(sea_mask,core_ice_flux_ds[v].isel(time=0),np.nan),
+                  'ECE3': (-1)*ece3_ds[v].isel(time=0)
+              }
+
+
+    da_dict = {k: v.transpose('latitude', 'longitude') for k,v in da_dict.items()}
+        
+
+    fig, axs = plot_grid_shared_axes(da_grid= [list(da_dict.values())], 
+                              num_rows=1, 
+                              num_cols=len(da_dict.keys()), 
+                              titles_grid=[[item.replace('ace2', 'ACE2').replace('era5', 'ERA5') for item in da_dict.keys()]],
+                              cbar_label=v,
+                              vmin=-200, 
+                              vmax=200,
+                              shrink_factor=0.7, 
+                              central_longitude=180, 
+                              cmap='RdBu_r', 
+                              mask=None)
+
+# %%
+fig, ax = plt.subplots(1,1)
+
+# ace2_im = ((ace2_series)).plot.kde(linewidth=2, ax=ax, label='ACE2')
+core_im = ((core_series)/2).plot.kde(linewidth=2, ax=ax, label='CORE')
+((era5_series)).plot.kde(linewidth=2, ax=ax, label='ERA5')
+# ((ece3_series)).plot.kde(linewidth=2, ax=ax, label='ECE3')
+
+# ax.set_yscale('log')
+ax.legend()
+
+# %%
+fig, ax = plt.subplots(1,1)
+
+ace2_im = (np.abs(ace2_series)).plot.kde(linewidth=2, ax=ax, label='ACE2')
+# core_im = ((core_series)/2).plot.kde(linewidth=2, ax=ax, label='CORE')
+(np.abs(era5_series)).plot.kde(linewidth=2, ax=ax, label='ERA5')
+(np.abs(ece3_series)).plot.kde(linewidth=2, ax=ax, label='ECE3')
+
+# ax.set_yscale('log')
+ax.set_xscale('log')
+
+ax.legend()
+
+
+# %%
+def sensible_heat_flux_over_ice(atmosphere_ds, ice_ds):
+    # Sensible heat flux; note that it is defined as positive when heat is transferred from the air to the ice
+    sensible_heat_flux = air_density * specific_heat_capacity_air * C_ice * atmosphere_ds['relative_wind_speed_ice'] * (atmosphere_ds['2m_temperature'] - ice_ds['sea_ice_temperature'])
+    
+    return sensible_heat_flux
+
+
+# %%
+sensible_heat_flux = air_density * specific_heat_capacity_air * C_ice * atmosphere_ds['relative_wind_speed_ice'] * (atmosphere_ds['2m_temperature'] - ocean_ds['sea_ice_temperature'])
+sensible_heat_flux_surf = air_density * specific_heat_capacity_air * C_ice * atmosphere_ds['relative_wind_speed_ice'] * (atmosphere_ds['surface_temperature'] - ocean_ds['sea_ice_temperature'])
+
+
+# %%
+fig, ax = plt.subplots(1,3, figsize=(3*8,6))
+
+xr.where(ice_mask, sensible_heat_flux.isel(time=0), np.nan).plot(vmax=300, vmin=-300, cmap='RdBu_r', x='longitude', y='latitude', ax=ax[0])
+xr.where(ice_mask, sensible_heat_flux_surf.isel(time=0), np.nan).plot(vmax=300, vmin=-300, cmap='RdBu_r', x='longitude', y='latitude', ax=ax[1])
+xr.where(ice_mask, (sensible_heat_flux_surf - sensible_heat_flux_surf).isel(time=0), np.nan).plot(cmap='RdBu_r', x='longitude', y='latitude', ax=ax[2])
+
+# %%
+ocean_ds['sea_ice_temperature'].isel(time=0).plot(vmin=220, vmax=273, x='longitude', y='latitude')
+
+# %%
+era5_ds['2m_temperature'].isel(time=0).plot()
+
+# %%
+(atmosphere_ds['2m_temperature'] - era5_ds['skin_temperature'].isel(time=0)).plot()
+
+# %%
+ncols = 3
+fig, ax = plt.subplots(1,ncols, figsize=(8*ncols,6))
+
+xr.where(ice_mask, atmosphere_ds['2m_temperature']- ocean_ds['sea_ice_temperature'].isel(time=0), np.nan).plot( cmap='RdBu_r', x='longitude', y='latitude', ax=ax[0])
+xr.where(ice_mask, sensible_heat_flux, np.nan).plot(vmax=100, vmin=-100, cmap='RdBu_r', x='longitude', y='latitude', ax=ax[1])
+xr.where(ice_mask, flux_ds['sensible_heat_flux_ice'], np.nan).plot(vmax=100, vmin=-100,cmap='RdBu_r', x='longitude', y='latitude', ax=ax[2])
+
+ax[0].set_title('T2m - Ice temp')
+ax[1].set_title('CORE sensible heat flux')
+ax[2].set_title('ACE2 heat flux')
+
+# %%
+ncols = 3
+fig, ax = plt.subplots(1,ncols, figsize=(8*ncols,6))
+
+xr.where(ice_mask, atmosphere_ds['2m_temperature']- ocean_ds['sea_ice_temperature'].isel(time=0), np.nan).plot( cmap='RdBu_r', x='longitude', y='latitude', ax=ax[0])
+xr.where(ice_mask, sensible_heat_flux, np.nan).plot(vmax=100, vmin=-100, cmap='RdBu_r', x='longitude', y='latitude', ax=ax[1])
+xr.where(ice_mask, flux_ds['sensible_heat_flux_ice'], np.nan).plot(vmax=100, vmin=-100,cmap='RdBu_r', x='longitude', y='latitude', ax=ax[2])
+
+ax[0].set_title('T2m - Ice temp')
+ax[1].set_title('CORE sensible heat flux')
+ax[2].set_title('ACE2 heat flux')
+
+# %%
+xr.where(ice_mask, (atmosphere_ds['surface_temperature'] - atmosphere_ds['2m_temperature'])/atmosphere_ds['surface_temperature'], np.nan).plot(x='longitude', y='latitude',)
+
+# %%
+## Look at ice restart files
+
+# %%
+ice_ds = xr.load_dataset('/home/ecme4254/perm/ece3data/nemo/restart/ORCA1/19510101/restart_ice.nc')
+
+# %%
+ice_ds['temp_ice_avg'] = 0.2* ( ice_ds['tempt_il1_htc1'] + ice_ds['tempt_il1_htc2'] + ice_ds['tempt_il1_htc3'] + ice_ds['tempt_il1_htc4'] + ice_ds['tempt_il1_htc5'])
+
+# %%
+ice_ds
+
+# %%
+avg_vals  = []
+for i in range(5):
+    avg_vals.append((i, ice_ds[f't_su_htc{i+1}'].mean()))
+
+# %%
+fig, ax = plt.subplots(1,1)
+
+ax.scatter([item[0] for item in avg_vals], [item[1] for item in avg_vals])
+ax.set_xlabel('Ice depth label (larger is deeper)')
+ax.set_ylabel('Ice temperature [K]')
+
+# %%
+ice_ds[f't_su_htc1'].isel(t=0) .plot()
+
+# %%
+oce2atm_new = xr.load_dataset('/home/ecme4254/scratch/run_dir/n3.6_ace2_1951_multiIceCat_19510101-19560101_m0/router/oce2atm_6h_ace2_nemo.nc')
+
+# %%
+oce2atm_old = xr.load_dataset('/home/ecme4254/scratch/run_dir/n3.6_ace2_1951_control_compressed_19510101-19610101_m0/router/oce2atm_6h_ace2_nemo.nc')
+
+# %%
+(oce2atm_new['sea_ice_temperature'] - oce2atm_old['sea_ice_temperature']).isel(time=0).plot()
+
+# %%

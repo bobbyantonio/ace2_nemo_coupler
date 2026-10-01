@@ -25,7 +25,8 @@
 script_dir="/home/ecme4254/perm/repos/ace2_nemo_coupler/data_download"
 # # loop over all files in this directory
 for data_type in "EC-Earth3P_hist-1950" "EC-Earth3P_control-1950"; do 
-    for variable in "tos" "tas" "pr" "siconc" "sithick" "tauu" "tauv" "thetao" "zos" "hfls" "hfss" "rlds" "rlus" "rsus" "rsds" "mlotst" "uo" "vo" "uas" "vas", "psl"; do
+    # for variable in "tos" "tas" "pr" "siconc" "sithick" "tauu" "tauv" "thetao" "zos" "hfls" "hfss" "rlds" "rlus" "rsus" "rsds" "mlotst" "uo" "vo" "uas" "vas", "psl"; do
+    for variable in "vas"; do
         
         echo "Gathering data for ${data_type} and variable ${variable}"
         output_dir=$SCRATCH/ece3_cmip6_data_download/${data_type}/${variable}

@@ -35,44 +35,21 @@ import calendar
 from itertools import chain
 import cartopy.mpl.ticker as cticker
 from scipy import signal
-
+import xesmf as xe
 # python_path = sys.executable
 # esmkfile_path = python_path.replace('bin/python', 'lib/esmf.mk')
 # os.environ['ESMFMKFILE'] = esmkfile_path
 
 # %%
-import xesmf as xe
+
 
 sys.path.append('/home/users/bantonio/repos/ace2_nemo_coupler')
 
 from notebooks.coupling_processing_utils import detrend_dataarray, \
     load_ece3_data, convert_dts_to_first_of_month, calculate_en34, calculate_linear_relationship, \
     mean_areas, calculate_en34_spectra, calculate_correlation, OLEVEL_VALUES, calculate_lagged_correlations, calculate_anomalies, \
-    bjerknes_feedback_analysis, calculate_nino_index, is_notebook
+    bjerknes_feedback_analysis, calculate_nino_index, is_notebook, ece3_var_lookup
 # from notebook_utils.plotting import plot_grid_shared_axes
-
-ece3_var_lookup = {"tas": "2m_temperature", 
-                   "tos": "sea_surface_temperature",
-                   "siconc": "sea_ice_fraction",
-                   'thetao': 'sea_water_potential_temperature',
-                   "sithick": "sea_ice_thickness",
-                   "pr": "total_precipitation",
-                   "zos": "sea_surface_height", # sea surface height above geoid
-                   "hfls": 'mean_surface_latent_heat_flux',
-                    "hfss": 'mean_surface_sensible_heat_flux',
-                    "rlds": "mean_surface_downward_long_wave_radiation_flux",
-                    "rlus": "mean_surface_upward_long_wave_radiation_flux",
-                    "rsds": "mean_surface_downward_short_wave_radiation_flux",
-                    "rsus": "mean_surface_upward_short_wave_radiation_flux",
-                   "mlotst": "mixed_layer_depth",
-                   'tauu': 'instantaneous_eastward_turbulent_surface_stress',
-                   'tauv': 'instantaneous_northward_turbulent_surface_stress',
-                   "uo": "ssu",
-                   "vo": "ssv",
-                   "uas": "10m_u_component_of_wind",
-                   "vas": "10m_v_component_of_wind",
-                   'psl': 'surface_pressure'
-                  }
 
 all_ocean_t_vars = ['tos', 'siconc', 'thetao', 'sithick', 'zos', 'mlotst', 'thetao']
 all_ocean_u_vars = ['uo']

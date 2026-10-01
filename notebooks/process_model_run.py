@@ -5,7 +5,7 @@
 #       extension: .py
 #       format_name: percent
 #       format_version: '1.3'
-#       jupytext_version: 1.19.1
+#       jupytext_version: 1.17.1
 #   kernelspec:
 #     display_name: ece4
 #     language: python
@@ -38,21 +38,20 @@ from notebooks.coupling_processing_utils import detrend_dataarray, \
     convert_dts_to_first_of_month, calculate_en34 ,calculate_linear_relationship, \
     mean_areas, calculate_en34_spectra, vertical_integral, load_ds_subset, load_nemo_ds_subset,\
     calculate_correlation, OLEVEL_VALUES, OLEVEL_BIN_EDGES, calculate_lagged_correlations, calculate_anomalies, \
-    bjerknes_feedback_analysis, calculate_nino_index, ace2_var_lookup, is_notebook
+    bjerknes_feedback_analysis, calculate_nino_index, is_notebook
 
 BASE_OUTPUT_DIR = '/home/ecme4254/perm/repos/ace2_nemo_coupler/notebooks/processed_data'
 
 # %%
 if is_notebook():
-
-    experiment_id = 'n3.6_ace2_1951_spinupCMIP6_19510101-20210101'
+    experiment_id = 'n3.6_ace2_noFWB_19510101-19530101'
     ensemble_members = [0]
-    glob_str = '199*'
+    glob_str = '195*'
     # model_run_dir='/home/ecme4254/perm/old_model_runs'
     model_run_dir ='/home/ecme4254/hpcperm/model_runs'
 
     components = ''
-    month_lag_max = 1
+    month_lag_max = 0
     debug=True
 else:
     parser = ArgumentParser()
@@ -100,6 +99,18 @@ atm2oce_vars = ['mean_surface_sensible_heat_flux',
            'instantaneous_eastward_turbulent_surface_stress',
            'instantaneous_northward_turbulent_surface_stress']
 
+ace2_var_lookup = {'TMP2m': '2m_temperature',
+                   'surface_temperature': 'surface_temperature', 
+                   'PRATEsfc': 'total_precipitation',
+                   'PRESsfc': 'surface_pressure',
+                   'Q2m': '2m_specific_humidity',
+                   'UGRD10m': '10m_u_component_of_wind',
+                   'VGRD10m': '10m_v_component_of_wind'
+                   }
+
+for n in range(8):
+    ace2_var_lookup[f'specific_total_water_{n}'] = f'specific_total_water_{n}'
+    
 oce2atm_vars = ['sea_ice_fraction', 'sea_ice_thickness', 'sea_ice_temperature']
 
 atmosphere_vars = list(ace2_var_lookup.keys())
@@ -140,7 +151,6 @@ oce2atm_ds = xr.concat([load_ds_subset(f'{base_dir}_m{n}', f'oce2atm_MS_{model_n
 
 # %%
 print('Loading atmosphere data', flush=True)
-
 
 atmosphere_monthly_ds = xr.concat([load_ds_subset(f'{base_dir}_m{n}', f'{model_name}_MS_{model_name}_nemo_{glob_str}.nc', atmosphere_vars).expand_dims({'member': [n]}) for n in ensemble_members], dim='member')
 atmosphere_monthly_ds = atmosphere_monthly_ds.rename(ace2_var_lookup)
@@ -233,16 +243,13 @@ for grid_string, grid_vars in nemo_vars_dict.items():
                                                                level_values=OLEVEL_VALUES,
                                                                bin_edge_values=OLEVEL_BIN_EDGES,
                                                                decode_times=False, 
-                                                               concat_dim='time_counter').expand_dims({'member': [n]})
-        # This is necessary due to different values of time_counter for different ensemble members
-        tmp_ds = tmp_ds.sortby('time_counter')
-        tmp_ds = tmp_ds.assign_coords({'time_counter': sorted(atmosphere_monthly_ds['time'].values[:len(tmp_ds['time_counter'].values)])})
-        tmp_ds = tmp_ds.drop_vars('time_centered')
+                                                               concat_dim='time').expand_dims({'member': [n]})
         nemo_ds_dict[grid_string].append(tmp_ds)
-        
-    nemo_ds_dict[grid_string] = xr.concat(nemo_ds_dict[grid_string], dim='member', join='exact', coords='minimal')
+
+
+    nemo_ds_dict[grid_string] = xr.concat(nemo_ds_dict[grid_string], dim='member', join='outer', coords='minimal')
     
-    nemo_ds_dict[grid_string] = nemo_ds_dict[grid_string].rename({k: v for k,v in rename_dict.items() if k in grid_vars}).rename({'time_counter': 'time'})
+    nemo_ds_dict[grid_string] = nemo_ds_dict[grid_string].rename({k: v for k,v in rename_dict.items() if k in grid_vars})
     nemo_ds_dict[grid_string] = nemo_ds_dict[grid_string].sortby('time')
     
     tmp_regridder = xe.Regridder(nemo_ds_dict[grid_string].isel(time=0, member=0), 
@@ -259,6 +266,10 @@ for grid_string, grid_vars in nemo_vars_dict.items():
 
 # %%
 nemo_ds = xr.merge(list(nemo_ds_dict.values()))
+
+# %%
+if 'sea_surface_temperature' in nemo_ds.data_vars:
+    nemo_ds['sea_surface_temperature'] = nemo_ds['sea_surface_temperature'] + 273.15
 
 # %%
 print('Joining datasets together', flush=True)
@@ -350,6 +361,36 @@ experiment_ds['sea_ice_temperature_gradient'] = experiment_ds['2m_temperature'] 
 experiment_ds['surface_temperature_difference'] = experiment_ds['2m_temperature'] - xr.where(ice_mask_t, experiment_ds['sea_ice_temperature'], experiment_ds['sea_surface_temperature'])
 
 # %%
+# Sea ice analysis
+from scipy.ndimage import uniform_filter
+
+# Find which areas are affected by our coastal ice flux fix
+
+land_mask = np.isnan(experiment_ds['sea_surface_temperature'].isel(time=0, member=0))
+tmp_ice_mask = (experiment_ds['sea_ice_fraction'] > 0.1).sel(member=0)
+filtered_land_mask = uniform_filter(land_mask.values.astype(np.float32), size=3)
+
+filtered_land_mask = xr.DataArray(
+    data=filtered_land_mask,
+    dims=land_mask.dims,
+    coords=dict(
+        latitude=land_mask['latitude'].values,
+        longitude=land_mask['longitude'].values
+    )
+)
+
+masked_points = xr.where(ice_mask, xr.where(filtered_land_mask>0, 1, 0), 0)
+
+if not debug:
+    masked_points.to_netcdf(os.path.join(OUTPUT_DIR, f'masked_ice_flux_points.nc'))
+
+# Annoyingly the sea ice fraction thresholds are inconsistent...
+# But the threshold here is more accomodating, so it doesn't lead to inconsistencies
+for v in ['solar_flux_over_ice', 'total_non_solar_flux_ice']:
+    experiment_ds[v] = xr.where(tmp_ice_mask, experiment_ds[v], np.nan)
+    experiment_ds[f'coastal_masked_{v}'] = xr.where(tmp_ice_mask, xr.where(filtered_land_mask>0, 0, experiment_ds[v]), experiment_ds[v])
+
+# %%
 # Weights for calculating global averages
 weights = np.cos(np.deg2rad(atmosphere_monthly_ds.latitude))
 weights = weights / weights.sum().item()
@@ -384,6 +425,7 @@ time_range_dict = {'Pre-1980': [dt for dt in time_vals if dt.year <=1980],
                    'DJF': [dt for dt in time_vals if dt.month in [12,1,2]],
                    '1st month': time_vals[:1],
                    '1st year': time_vals[:12],
+                   '1st 2 years': time_vals[:24],
                    '5th year': time_vals[48:60],
                    '1st decade': time_vals[:120],
                    'last 10 years': time_vals[-120:],
@@ -443,12 +485,12 @@ print('Calculating spatial means', flush=True)
 mean_dict = {}
 
 
-for area_name, lat_dict in mean_areas.items():
+for area_name, latlon_dict in mean_areas.items():
     
-    experiment_mean_ds = experiment_ds.sel(latitude=slice(lat_dict['min_lat'],lat_dict['max_lat'])).weighted(weights.sel(latitude=slice(lat_dict['min_lat'],lat_dict['max_lat']))).mean(['latitude', 'longitude']).sortby('time')
+    experiment_mean_ds = experiment_ds.sel(latitude=slice(latlon_dict['min_lat'],latlon_dict['max_lat']), longitude=slice(latlon_dict.get('min_lon', 0), latlon_dict.get('max_lon', 360))).weighted(weights.sel(latitude=slice(latlon_dict['min_lat'],latlon_dict['max_lat']))).mean(['latitude', 'longitude']).sortby('time')
   
     # Unweighted sum, for variables that are already expressed in weighted units (e.g. ice area)
-    experiment_unweighted_sum_ds = experiment_ds.sel(latitude=slice(lat_dict['min_lat'],lat_dict['max_lat'])).sum(['latitude', 'longitude']).sortby('time')
+    experiment_unweighted_sum_ds = experiment_ds.sel(latitude=slice(latlon_dict['min_lat'],latlon_dict['max_lat']), longitude=slice(latlon_dict.get('min_lon', 0), latlon_dict.get('max_lon', 360))).sum(['latitude', 'longitude']).sortby('time')
 
     mean_dict[area_name] = {'mean': experiment_mean_ds,
                             'UnweightedSum': experiment_unweighted_sum_ds

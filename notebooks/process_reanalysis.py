@@ -5,7 +5,7 @@
 #       extension: .py
 #       format_name: percent
 #       format_version: '1.3'
-#       jupytext_version: 1.19.1
+#       jupytext_version: 1.17.1
 #   kernelspec:
 #     display_name: ece4
 #     language: python
@@ -187,12 +187,12 @@ print('Calculating spatial means', flush=True)
 mean_dict = {}
 
 
-for area_name, lat_dict in mean_areas.items():
+for area_name, lat_lon_dict in mean_areas.items():
     
-    era5_mean_ds = era5_ds.sel(latitude=slice(lat_dict['min_lat'],lat_dict['max_lat'])).weighted(weights.sel(latitude=slice(lat_dict['min_lat'],lat_dict['max_lat']))).mean(['latitude', 'longitude']).sortby('time')
+    era5_mean_ds = era5_ds.sel(latitude=slice(lat_lon_dict['min_lat'],lat_lon_dict['max_lat']), longitude=slice(lat_lon_dict.get('min_lon', 0), lat_lon_dict.get('max_lon', 360))).weighted(weights.sel(latitude=slice(lat_lon_dict['min_lat'],lat_lon_dict['max_lat']), longitude=slice(lat_lon_dict.get('min_lon', 0), lat_lon_dict.get('max_lon', 360)))).mean(['latitude', 'longitude']).sortby('time')
   
     # Unweighted sum, for variables that are already expressed in weighted units (e.g. ice area)
-    era5_unweighted_sum_ds = era5_ds.sel(latitude=slice(lat_dict['min_lat'],lat_dict['max_lat'])).sum(['latitude', 'longitude']).sortby('time')
+    era5_unweighted_sum_ds = era5_ds.sel(latitude=slice(lat_lon_dict['min_lat'],lat_lon_dict['max_lat']), longitude=slice(lat_lon_dict.get('min_lon', 0), lat_lon_dict.get('max_lon', 360))).sum(['latitude', 'longitude']).sortby('time')
 
     mean_dict[area_name] = {'mean': era5_mean_ds,
                             'UnweightedSum': era5_unweighted_sum_ds
