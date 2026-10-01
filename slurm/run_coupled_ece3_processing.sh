@@ -1,11 +1,9 @@
 #!/bin/bash 
 #SBATCH --job-name=coupled-ece3-proc
 #SBATCH --output=logs/process_ece3-%A.txt 
-#SBATCH --partition=standard
 #SBATCH --ntasks=1
 #SBATCH --time=00-04:00:00 
-#SBATCH --account=eerie
-#SBATCH --qos=short
+#SBATCH --qos=np
 #SBATCH --mem=100gb
 
 source ~/.bashrc
