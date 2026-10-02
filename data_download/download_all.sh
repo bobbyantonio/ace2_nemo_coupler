@@ -50,8 +50,23 @@ script_dir=$(pwd)
 #     done
 # done
 
-for data_type in "EC-Earth3P_control-1950-3hr"; do
-    for variable in "tos"; do
+# for data_type in "EC-Earth3P_control-1950-3hr"; do
+#     for variable in "tos"; do
+        
+#         output_dir=/network/group/aopp/predict/HMC005_ANTONIO_EERIE/CMIP6_data/${data_type}/${variable}
+
+#         mkdir -p $output_dir
+#         cd $output_dir
+
+#         cp ${script_dir}/${data_type}/${variable}_ceda_download.sh ceda_download_temp.sh
+
+#         chmod +x ceda_download_temp.sh
+#         ./ceda_download_temp.sh -s
+#     done
+# done
+
+for data_type in "EC-Earth3P_control-1950-daily"; do
+    for variable in "sitemptop"; do
         
         output_dir=/network/group/aopp/predict/HMC005_ANTONIO_EERIE/CMIP6_data/${data_type}/${variable}
 

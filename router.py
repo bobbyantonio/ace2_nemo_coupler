@@ -304,9 +304,9 @@ class FluxCalculator:
                  ocean_source: str,
                  latitude_vals: list,
                  longitude_vals: list,
-                 coastal_ice_flux_masking: bool=True,
                  first_poll_timeout: int,
                  polling_timeout: int,
+                 coastal_ice_flux_masking: bool=True,
                  start_from_era5: bool=False,
                  infer_solid_precipitation: bool=True):
         
@@ -352,7 +352,9 @@ class FluxCalculator:
             self.climatology_ds = self.climatology_ds.regrid.linear(self.base_dataarray)
 
     def current_step_climatology(self, dt: datetime.datetime):
-        return self.climatology_ds.interp(dayofyear=dt.dayofyear, hour=dt.hour, method='linear').drop_vars(['dayofyear', 'hour'])
+        if self.climatology_ds is not None:
+            return self.climatology_ds.interp(dayofyear=dt.dayofyear, hour=dt.hour, method='linear').drop_vars(['dayofyear', 'hour'])
+        
 
     def __call__(self, 
                  dt: datetime.datetime,
@@ -531,9 +533,12 @@ class FluxCalculator:
             flux_ds = flux_ds.fillna(flux_ds.mean())
             
             flux_ds['mean_surface_net_short_wave_radiation_flux'] = solar_flux_over_ocean(atmosphere_ds, ocean_ds)
-        
-            # Calculated fluxes over ice
-            non_solar_flux_ds = non_solar_fluxes_ice(atmosphere_ds, ocean_ds, self.current_step_climatology(dt), source=atmosphere_source)
+            atmosphere_ds = atmosphere_ds[[v for v in atmosphere_ds.data_vars if v not in flux_ds.data_vars]]
+            
+                    # Calculated fluxes over ice
+            non_solar_flux_ds = non_solar_fluxes_ice(atmosphere_ds=atmosphere_ds, 
+                                                     ice_ds=ocean_ds, 
+                                                     clim_ds=self.current_step_climatology(dt), source=atmosphere_source)
             
             # latent heat flux is negative when ice is sublimated into the air, but ERA5 convention is that "negative values indicate evaporation and positive values indicate condensation". So we keep the ERA5 convention here to be consistent with ERA5 calculations
             flux_ds['evaporation_ice'] = non_solar_flux_ds['latent_heat_flux_ice'] / Ls
