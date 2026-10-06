@@ -227,6 +227,281 @@ def plot_map_grid_cbar_by_row(da_grid,
         cbar.ax.tick_params(labelsize=10)
     return fig, plot_axs
 
+
+def plot_map_grid(da_grid,
+                 cbar_labels,
+                 titles_grid,
+                 vmax_vals,
+                 vmin_vals,
+                 projection,
+                 cmaps,
+                 column_groups,
+                 width_height_ratio=[8, 6],
+                 shrink_factor=1,
+                 wspace=0.001,
+                 cbar_height_ratio=0.02,
+                 lat_ticks=None,
+                 lon_ticks=None,
+                 cbar_max_width=1.0):
+    """Plot a map grid with one colorbar per row and column group.
+
+    column_groups contains contiguous, zero-based column indices, for example
+    [[0, 1], [2]] to share colorbars across columns 0–1 and column 2.
+    cbar_max_width is the maximum colorbar width in subplot-width units.
+    """
+    num_rows = len(da_grid)
+    if num_rows == 0 or not da_grid[0]:
+        raise ValueError("da_grid must contain at least one row and column")
+
+    num_cols = len(da_grid[0])
+    if any(len(row) != num_cols for row in da_grid):
+        raise ValueError("All rows in da_grid must have the same number of columns")
+    if cbar_max_width <= 0:
+        raise ValueError("cbar_max_width must be greater than zero")
+
+    groups = [list(group) for group in column_groups]
+    flattened = [col for group in groups for col in group]
+    if (not groups
+            or any(not group for group in groups)
+            or sorted(flattened) != list(range(num_cols))):
+        raise ValueError("column_groups must partition all columns exactly once")
+    for group in groups:
+        if group != list(range(min(group), max(group) + 1)):
+            raise ValueError("Each column group must contain contiguous columns")
+
+    fig = plt.figure(
+        constrained_layout=True,
+        figsize=(
+            num_cols * shrink_factor * width_height_ratio[0],
+            num_rows * shrink_factor * width_height_ratio[1],
+        ),
+    )
+    gs = gridspec.GridSpec(
+        num_rows * 2,
+        num_cols,
+        figure=fig,
+        width_ratios=[1] * num_cols,
+        height_ratios=[1, cbar_height_ratio] * num_rows,
+        wspace=wspace,
+    )
+
+    plot_axs = [
+        [fig.add_subplot(gs[2 * row, col], projection=projection)
+         for col in range(num_cols)]
+        for row in range(num_rows)
+    ]
+    colorbar_axes = []
+    row_images = []
+
+    for row in range(num_rows):
+        images = []
+        for col in range(num_cols):
+            ax = plot_axs[row][col]
+            im = da_grid[row][col].plot(
+                ax=ax,
+                vmax=vmax_vals[row],
+                vmin=vmin_vals[row],
+                cmap=cmaps[row],
+                add_colorbar=False,
+                rasterized=True,
+                transform=ccrs.PlateCarree(),
+            )
+            images.append(im)
+
+            try:
+                if lon_ticks is not None:
+                    ax.set_xticks(lon_ticks, crs=ccrs.PlateCarree())
+                    ax.xaxis.set_major_formatter(cticker.LongitudeFormatter())
+                    ax.set_xlabel("Longitude")
+                if col == 0 and lat_ticks is not None:
+                    ax.set_yticks(lat_ticks, crs=ccrs.PlateCarree())
+                    ax.yaxis.set_major_formatter(cticker.LatitudeFormatter())
+                    ax.set_ylabel("Latitude")
+            except RuntimeError:
+                pass
+
+            ax.set_title(titles_grid[row][col])
+            ax.coastlines()
+
+        row_images.append(images)
+        for group in groups:
+            colorbar_ax = fig.add_subplot(
+                gs[2 * row + 1, min(group):max(group) + 1]
+            )
+            colorbar_axes.append((colorbar_ax, row, group))
+
+    # Measure the laid-out subplot widths, then cap and center each colorbar.
+    fig.canvas.draw()
+    subplot_width = plot_axs[0][0].get_position().width
+    fig.set_constrained_layout(False)
+
+    for colorbar_ax, row, group in colorbar_axes:
+        im = row_images[row][group[0]]
+        plt.colorbar(
+            im,
+            cax=colorbar_ax,
+            label=cbar_labels[row],
+            orientation="horizontal",
+        )
+        colorbar_ax.tick_params(labelsize=10)
+
+        bbox = colorbar_ax.get_position()
+        width = min(bbox.width, cbar_max_width * subplot_width)
+        colorbar_ax.set_position([
+            bbox.x0 + (bbox.width - width) / 2,
+            bbox.y0,
+            width,
+            bbox.height,
+        ])
+
+    return fig, plot_axs
+
+
+def plot_map_grid(da_grid,
+                 cbar_labels,
+                 titles_grid,
+                 vmax_vals,
+                 vmin_vals,
+                 projection,
+                 cmaps,
+                 column_groups,
+                 width_height_ratio=[8, 6],
+                 shrink_factor=1,
+                 wspace=0.001,
+                 cbar_height_ratio=0.02,
+                 lat_ticks=None,
+                 lon_ticks=None,
+                 cbar_max_width=1.0,
+                 bottom_row_colorbars=False):
+    """Plot a map grid with colorbars shared by specified column groups.
+
+    column_groups contains contiguous, zero-based column indices, for example
+    [[0, 1], [2]] to share colorbars across columns 0–1 and column 2.
+    cbar_max_width is the maximum colorbar width in subplot-width units.
+    If bottom_row_colorbars is True, show colorbars only below the last row.
+    """
+    num_rows = len(da_grid)
+    if num_rows == 0 or not da_grid[0]:
+        raise ValueError("da_grid must contain at least one row and column")
+
+    num_cols = len(da_grid[0])
+    if any(len(row) != num_cols for row in da_grid):
+        raise ValueError("All rows in da_grid must have the same number of columns")
+    if cbar_max_width <= 0:
+        raise ValueError("cbar_max_width must be greater than zero")
+
+    groups = [list(group) for group in column_groups]
+    flattened = [col for group in groups for col in group]
+    if (not groups
+            or any(not group for group in groups)
+            or sorted(flattened) != list(range(num_cols))):
+        raise ValueError("column_groups must partition all columns exactly once")
+    for group in groups:
+        if group != list(range(min(group), max(group) + 1)):
+            raise ValueError("Each column group must contain contiguous columns")
+
+    if bottom_row_colorbars:
+        grid_rows = num_rows + 1
+        height_ratios = [1] * num_rows + [cbar_height_ratio]
+    else:
+        grid_rows = num_rows * 2
+        height_ratios = [1, cbar_height_ratio] * num_rows
+
+    fig = plt.figure(
+        constrained_layout=True,
+        figsize=(
+            num_cols * shrink_factor * width_height_ratio[0],
+            num_rows * shrink_factor * width_height_ratio[1],
+        ),
+    )
+    gs = gridspec.GridSpec(
+        grid_rows,
+        num_cols,
+        figure=fig,
+        width_ratios=[1] * num_cols,
+        height_ratios=height_ratios,
+        wspace=wspace,
+    )
+
+    plot_axs = [
+        [
+            fig.add_subplot(
+                gs[row if bottom_row_colorbars else 2 * row, col],
+                projection=projection,
+            )
+            for col in range(num_cols)
+        ]
+        for row in range(num_rows)
+    ]
+
+    colorbar_axes = []
+    row_images = []
+
+    for row in range(num_rows):
+        images = []
+        for col in range(num_cols):
+            ax = plot_axs[row][col]
+            im = da_grid[row][col].plot(
+                ax=ax,
+                vmax=vmax_vals[row],
+                vmin=vmin_vals[row],
+                cmap=cmaps[row],
+                add_colorbar=False,
+                rasterized=True,
+                transform=ccrs.PlateCarree(),
+            )
+            images.append(im)
+
+            try:
+                if lon_ticks is not None:
+                    ax.set_xticks(lon_ticks, crs=ccrs.PlateCarree())
+                    ax.xaxis.set_major_formatter(cticker.LongitudeFormatter())
+                    ax.set_xlabel("Longitude")
+                if col == 0 and lat_ticks is not None:
+                    ax.set_yticks(lat_ticks, crs=ccrs.PlateCarree())
+                    ax.yaxis.set_major_formatter(cticker.LatitudeFormatter())
+                    ax.set_ylabel("Latitude")
+            except RuntimeError:
+                pass
+
+            ax.set_title(titles_grid[row][col])
+            ax.coastlines()
+
+        row_images.append(images)
+
+        if not bottom_row_colorbars or row == num_rows - 1:
+            cbar_row = num_rows if bottom_row_colorbars else 2 * row + 1
+            for group in groups:
+                colorbar_ax = fig.add_subplot(
+                    gs[cbar_row, min(group):max(group) + 1]
+                )
+                colorbar_axes.append((colorbar_ax, row, group))
+
+    # Measure subplot widths, then cap and center each colorbar.
+    fig.canvas.draw()
+    subplot_width = plot_axs[0][0].get_position().width
+    fig.set_constrained_layout(False)
+
+    for colorbar_ax, row, group in colorbar_axes:
+        plt.colorbar(
+            row_images[row][group[0]],
+            cax=colorbar_ax,
+            label=cbar_labels[row],
+            orientation="horizontal",
+        )
+        colorbar_ax.tick_params(labelsize=10)
+
+        bbox = colorbar_ax.get_position()
+        width = min(bbox.width, cbar_max_width * subplot_width)
+        colorbar_ax.set_position([
+            bbox.x0 + (bbox.width - width) / 2,
+            bbox.y0,
+            width,
+            bbox.height,
+        ])
+
+    return fig, plot_axs
+
 def plot_map_grid_cbar_by_column(da_grid,
                                 cbar_labels,
                                 titles_grid ,

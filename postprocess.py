@@ -85,10 +85,15 @@ if __name__ == "__main__":
                         help="save output to zarr format instead of netcdf")
     parser.add_argument('--compression-level', type=int, default=0,
                         help="compression level for netcdf output (1-9), if set to 0 then no compression is applied")
+    parser.add_argument('--first-poll-timeout', default=20*60, type=int)
+    parser.add_argument('--polling-timeout', default=10*60, type=int)
+    parser.add_argument('--year', type=int, help="Year to process for (defaults to all years)", default=None)
+    parser.add_argument('--month', type=int, help="Month to process for (defaults to all years)", default=None)
     parser.add_argument('--debug', action="store_true",
                         help="activate debugging")                 
     args = parser.parse_args()
     
+    print(os.path.join(args.model_directory, 'log', 'postprocess.log'))
     logging.basicConfig(filename=os.path.join(args.model_directory, 'log', 'postprocess.log'), 
                         encoding='utf-8', level=logging.INFO,
                         format='%(asctime)s %(message)s')
@@ -113,6 +118,13 @@ if __name__ == "__main__":
     n_coupling_steps = int(itend * rndt / coupling_timestep_s)
     
     all_dts = [pd.Timestamp(start_datetime + timedelta(seconds = coupling_timestep_s * n)) for n in range(n_coupling_steps)]
+    
+    if args.year is not None:
+        # Filter out required years
+        all_dts = [dt for dt in all_dts if dt.year == args.year]
+    if args.month is not None:
+        # Filter out required months
+        all_dts = [dt for dt in all_dts if dt.month == args.month]
     all_hour_diffs = [(dt -start_datetime).total_seconds() / 3600 for dt in all_dts]
     all_yms = [dt.strftime('%Y%m') for dt in all_dts]
     ym_set = set(all_yms)
@@ -130,7 +142,7 @@ if __name__ == "__main__":
         args.atmosphere_source: {'prefix': args.atmosphere_source, 'suffix': '', 'date_format': 'hour' if args.atmosphere_source in ['ace2', 'ace2-calculated'] else 'datetime'}
     }
     
-    for ym in tqdm(sorted(set(all_yms))):
+    for ym_ix, ym in tqdm(enumerate(sorted(set(all_yms)))):
         
         ym_df = df[df['yms'] == ym]
         
@@ -159,13 +171,19 @@ if __name__ == "__main__":
                     
                 fp = os.path.join(args.router_data_directory, f"{data_info['prefix']}_{date_str}{data_info['suffix']}.nc")
                 
-
-                tmp_ds =  polling2.poll(lambda: xr.load_dataset(fp), 
-                        ignore_exceptions=(IOError, ValueError, FileNotFoundError), 
-                        poll_forever=True if (not args.debug and args.run_in_background) else False,
-                        timeout=None if (not args.debug and args.run_in_background) else 1,
-                        step=0.1,
-                        log=logging.ERROR)
+                poll_timeout = args.first_poll_timeout if ym_ix ==0 else args.polling_timeout
+   
+                try:
+                    tmp_ds =  polling2.poll(lambda: xr.load_dataset(fp), 
+                                ignore_exceptions=(IOError, ValueError, FileNotFoundError), 
+                                poll_forever=False,
+                                timeout=poll_timeout,
+                                step=0.1,
+                                log=logging.ERROR)
+                except Exception as e:
+                    print(f"Error loading file {fp}")
+                    raise(e)
+                    
 
                 tmp_ds = tmp_ds.assign_coords(time=np.array([dt]))
                 

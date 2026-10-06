@@ -43,31 +43,33 @@ from scipy import signal
 import xarray_regrid
 import xesmf as xe
 
-sys.path.append('/perm/ecme4254/repos/nwp_notebooks')
-from notebook_utils.misc import is_notebook
-from eerie.coupled_experiments.coupling_processing_utils import detrend_dataarray, \
+sys.path.append('/perm/ecme4254/repos/ace2_nemo_coupler')
+
+from notebooks.coupling_processing_utils import detrend_dataarray, \
     convert_dts_to_first_of_month, calculate_en34 ,calculate_linear_relationship, \
     mean_areas, calculate_en34_spectra, bjerknes_feedback_analysis, calculate_nino_index, calculate_anomalies, \
-    load_era5_monthly, calculate_lagged_correlations
+    load_era5_monthly, calculate_lagged_correlations, is_notebook
 
-BASE_OUTPUT_DIR = '/perm/ecme4254/repos/nwp_notebooks/eerie/coupled_experiments/processed_data'
+BASE_OUTPUT_DIR = '/perm/ecme4254/repos/ace2_nemo_coupler/notebooks/processed_data'
 era5_dir = "/home/ecme4254/scratch/era5_monthly"
 
 # %%
 if is_notebook():
     years=range(2015,2021)
     debug=True
-    
+    month_lag_max=1
 else:
     parser = ArgumentParser()
     parser.add_argument('--debug', action='store_true')
     parser.add_argument('--years', type=str, default='1951-2021')
+    parser.add_argument('--month-lag-max', type=int, default=1)
     args = parser.parse_args()
 
     debug = args.debug
 
     years_split = args.years.split('-')
     years = range(int(years_split[0]), int(years_split[1])+1)
+    month_lag_max = args.month_lag_max
 
     if debug:
         years = years[:10]
@@ -189,7 +191,11 @@ mean_dict = {}
 
 for area_name, lat_lon_dict in mean_areas.items():
     
-    era5_mean_ds = era5_ds.sel(latitude=slice(lat_lon_dict['min_lat'],lat_lon_dict['max_lat']), longitude=slice(lat_lon_dict.get('min_lon', 0), lat_lon_dict.get('max_lon', 360))).weighted(weights.sel(latitude=slice(lat_lon_dict['min_lat'],lat_lon_dict['max_lat']), longitude=slice(lat_lon_dict.get('min_lon', 0), lat_lon_dict.get('max_lon', 360)))).mean(['latitude', 'longitude']).sortby('time')
+    era5_mean_ds = era5_ds.sel(latitude=slice(lat_lon_dict['min_lat'],
+                                              lat_lon_dict['max_lat']), 
+                               longitude=slice(lat_lon_dict.get('min_lon', 0), 
+                                               lat_lon_dict.get('max_lon', 360))).weighted(weights.sel(latitude=slice(lat_lon_dict['min_lat'],
+                                                                                                                      lat_lon_dict['max_lat']))).mean(['latitude', 'longitude']).sortby('time')
   
     # Unweighted sum, for variables that are already expressed in weighted units (e.g. ice area)
     era5_unweighted_sum_ds = era5_ds.sel(latitude=slice(lat_lon_dict['min_lat'],lat_lon_dict['max_lat']), longitude=slice(lat_lon_dict.get('min_lon', 0), lat_lon_dict.get('max_lon', 360))).sum(['latitude', 'longitude']).sortby('time')
@@ -207,7 +213,8 @@ if not debug:
 
 # %%
 for lag_vars in  [('mean_surface_downward_short_wave_radiation_flux', 'sea_surface_temperature'),
-                    ('mean_surface_heat_flux', 'sea_surface_temperature')]:
+                    ('mean_surface_heat_flux', 'sea_surface_temperature'),
+                    ('10m_u_component_of_wind', '10m_u_component_of_wind')]:
     
     print('Calculating lagged correlations', flush=True)
     lag_var1 = lag_vars[0]
@@ -217,7 +224,7 @@ for lag_vars in  [('mean_surface_downward_short_wave_radiation_flux', 'sea_surfa
                                                             era5_ds.copy(), 
                                                             lag_var1, 
                                                             lag_var2, 
-                                                            month_lag_max=1)
+                                                            month_lag_max=month_lag_max)
         
     
     # if not debug:
@@ -239,7 +246,7 @@ trends_time_range_dict = {'Pre-1980': [dt for dt in time_vals if dt.year <=1980]
 
 trends_dict = {}
 
-for name, tvals in time_range_dict.items():
+for name, tvals in trends_time_range_dict.items():
     trends_dict[name] = {}
     if len(tvals) > 0:
         for n, varname in enumerate(drift_vars):
@@ -287,8 +294,3 @@ era5_nino_stats_ds = calculate_linear_relationship(x,y)
 if not is_notebook():
     print(f'Saving Nino stats data to {OUTPUT_DIR}')
     era5_nino_stats_ds.to_netcdf(os.path.join(OUTPUT_DIR, 'era5_nino3_4_stats.nc'))
-
-# %% [markdown]
-# ## Experimental area
-
-# %%
