@@ -178,7 +178,8 @@ def get_era5_ocean_data(dt: datetime.datetime,
         tmp_da.name = var
         ocean_ds.append(tmp_da)
     
-    ocean_ds = xr.merge(ocean_ds).rename({'skin_temperature': 'sea_ice_temperature',
+    ocean_ds = xr.merge(ocean_ds, 
+                        compat='no_conflicts').rename({'skin_temperature': 'sea_ice_temperature',
                                       'sea_ice_cover': 'sea_ice_fraction',
                                       'forecast_albedo': 'ice_albedo'})
     
@@ -809,12 +810,17 @@ class FluxCalculator:
 
         hour_interval = int((dt - self.start_datetime).total_seconds() / 3600)
 
-        logger.debug(f"Polling ACE data in {os.path.join(data_dir, f'ace2_{hour_interval}h.nc')}")
-        ds = polling2.poll(lambda: xr.load_dataset(os.path.join(data_dir, f"ace2_{hour_interval}h.nc")), 
-                        ignore_exceptions=(IOError, ValueError, FileNotFoundError), 
-                        timeout=self.first_poll_timeout if self.poll_counter == 0 else self.polling_timeout,
-                        step=0.1,
-                        log=logging.ERROR)
+        fp = os.path.join(data_dir, f'ace2_{hour_interval}h.nc')
+        logger.debug(f"Polling ACE data in {fp}")
+        try:
+            ds = polling2.poll(lambda: xr.load_dataset(fp), 
+                            ignore_exceptions=(IOError, ValueError, FileNotFoundError), 
+                            timeout=self.first_poll_timeout if self.poll_counter == 0 else self.polling_timeout,
+                            step=0.1,
+                            log=logging.ERROR)
+        except polling2.TimeoutException as e:
+            logger.error(f"Error occurred while polling ACE data in {fp}: {e}")
+            raise
         self.poll_counter += 1
         
         # If we ingest a restart file, it may have time as a variable
@@ -963,6 +969,8 @@ if __name__ == "__main__":
                         help="Timeout for first poll in seconds")
     parser.add_argument('--polling-timeout', type=int, default=10*60,
                         help="Timeout for subsequent polls in seconds")
+    parser.add_argument('--initialisation-datetime', type=str, default=None,
+                        help="Initialisation date in YYYYMMDD-HH format. If not provided, will use the date from the NEMO namelist")
     parser.add_argument('--debug', action="store_true",
                         help="activate debugging")
     parser.add_argument('--test-mode', action="store_true",
@@ -1015,7 +1023,11 @@ if __name__ == "__main__":
         rndt = namelist_dict['namdom']['rn_Dt']
 
     itend = namelist_dict['namrun']['nn_itend'] # Total number of time steps that NEMO will run for
-    date0 = namelist_dict['namrun']['nn_date0']
+    if args.initialisation_datetime is not None:
+        date0 = args.initialisation_datetime
+    else:
+        date0 = namelist_dict['namrun']['nn_date0']
+        
     sn_rcv_qsr = namelist_dict['namsbc_cpl']['sn_rcv_qsr']
     n_coupling_steps = int(itend * rndt / coupling_timestep_s)
     n_atmosphere_steps = int(itend * rndt / atmospheric_timestep_s)
@@ -1034,7 +1046,10 @@ if __name__ == "__main__":
         if args.ocean_source != 'era5':
             os.makedirs(args.router_data_directory, exist_ok=True)
     
-    start_datetime = datetime.datetime.strptime(str(date0), '%Y%m%d')
+    if len(date0) == 8:
+        date0 = f"{date0}-00"
+        
+    start_datetime = datetime.datetime.strptime(str(date0), '%Y%m%d-%H')
     all_datetimes = [pd.Timestamp(start_datetime + datetime.timedelta(seconds=coupling_timestep_s * n)) for n in range(n_coupling_steps)]
 
     
@@ -1188,7 +1203,8 @@ if __name__ == "__main__":
                                            args.era5_directory, 
                                            atmosphere_grid=grid).sel(latitude=lat_points, longitude=lon_points)
         else:
-            ocean_ds = xr.merge(da_list).rename({'A_SST': 'sea_surface_temperature',
+            ocean_ds = xr.merge(da_list, 
+                                compat='no_conflicts').rename({'A_SST': 'sea_surface_temperature',
                     'A_Ice_temp': 'sea_ice_temperature',
                     'A_Ice_albedo': 'ice_albedo',
                     'A_Ice_frac': 'sea_ice_fraction',
