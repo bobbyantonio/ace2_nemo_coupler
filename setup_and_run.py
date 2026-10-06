@@ -127,7 +127,7 @@ if __name__ == "__main__":
 
     all_dates = pd.date_range(start=global_start_date, end=global_end_date, freq='D')
     all_yms = sorted(set([dt.strftime('%Y%m') for dt in all_dates]))
-    
+        
     if len(all_yms) < args.num_months_per_leg != 0:
         raise ValueError(f'Number of months per leg {args.num_months_per_leg} is greater than total number of months in simulation {len(all_yms)}')
     

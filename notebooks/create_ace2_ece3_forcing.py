@@ -103,10 +103,10 @@ def create_ace2_forcing_file(year, ece_tos_dir=ece_tos_dir, ece_sice_dir=ece_sic
     siconc_da = xr.where(~np.isnan(siconc_da), siconc_da, ace2_forcing_ds['sea_ice_fraction'])
     siconc_da.name = 'sea_ice_fraction'
 
-    new_ace2_forcing_ds = ace2_forcing_ds.assign({'surface_temperature': new_surf_temp_da, 
-                            'ocean_fraction': ocean_fraction,
-                            'sea_ice_fraction': siconc_da
-                            })
+    new_ace2_forcing_ds = ace2_forcing_ds.assign({'surface_temperature': new_surf_temp_da.transpose('time', 'latitude', 'longitude'), 
+                            'ocean_fraction': ocean_fraction.transpose('time', 'latitude', 'longitude'),
+                            'sea_ice_fraction': siconc_da.transpose('time', 'latitude', 'longitude')
+                            }).transpose('time', 'latitude', 'longitude')
 
     return new_ace2_forcing_ds
 
