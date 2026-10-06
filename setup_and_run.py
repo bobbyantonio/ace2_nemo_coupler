@@ -433,7 +433,7 @@ python postprocess.py --model-directory {rundir} --ocean-source nemo --atmospher
         atmosphere_job_status = get_slurm_job_status(atmosphere_jobid)
         if atmosphere_job_status != 'COMPLETED':
             logger.info(f'Terminating postprocessing job {postprocess_jobid} as atmosphere job has failed')
-            subprocess.run(['scancel', postprocess_jobid])
+            # subprocess.run(['scancel', postprocess_jobid])
             
             # if atmosphere_job_status == 'RUNNING':
             #     logger.info(f'Atmosphere job {atmosphere_jobid} is still running, cancelling it now')
