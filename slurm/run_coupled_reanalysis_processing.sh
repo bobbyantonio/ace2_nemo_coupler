@@ -8,8 +8,8 @@
 
 source ~/.bashrc
 
-jupytext --sync eerie/coupled_experiments/process_reanalysis.ipynb;
+jupytext --sync notebooks/process_reanalysis.ipynb;
 
 conda activate ece4
 
-python -m eerie.coupled_experiments.process_reanalysis --years 1951-2020;
+python -m notebooks.process_reanalysis --years 1951-2020 --month-lag-max 5;

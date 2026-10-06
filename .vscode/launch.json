@@ -38,6 +38,24 @@
             "--coupling-timestep-secs", "21600",
             "--climatology-directory", "/ec/res4/hpcperm/ecme4254/era5/climatology",
             "--era5-directory", "/scratch/ecme4254/era5"]
+        },  
+        {
+            "name": "Python: test receiver (ace2 - ERA5)",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "/home/ecme4254/perm/repos/ace2_nemo_coupler/router.py",
+            "console": "integratedTerminal",
+            "justMyCode": false,
+            "args": ["--debug",
+            "--model-directory", "/home/ecme4254/scratch/run_dir/test",
+            "--ocean-source", "era5",
+            "--router-data-directory", "/home/ecme4254/scratch/run_dir/test/router",
+            "--atmosphere-source", "ace2",
+            "--atmosphere-gridfile", "/home/ecme4254/hpcperm/ml_model_data/ace2/grid.nc",
+            "--atmospheric-timestep-hrs", "6",
+            "--coupling-timestep-secs", "21600",
+            "--climatology-directory", "/ec/res4/hpcperm/ecme4254/era5/climatology",
+            "--era5-directory", "/scratch/ecme4254/era5"]
         }, 
                 {
             "name": "Python: test receiver (era5)",
