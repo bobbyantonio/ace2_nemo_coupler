@@ -74,7 +74,7 @@ else:
     components = args.components
 
     if args.debug:
-        glob_str = '201*'
+        glob_str = '202*'
         debug=True
     else:
         glob_str = '??????'
