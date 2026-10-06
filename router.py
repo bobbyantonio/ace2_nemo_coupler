@@ -783,8 +783,9 @@ class FluxCalculator:
 
         hour_interval = int((dt - self.start_datetime).total_seconds() / 3600)
 
-        logger.debug(f"Polling ACE data in {os.path.join(data_dir, f'ace2_{hour_interval}h.nc')}")
-        ds = polling2.poll(lambda: xr.load_dataset(os.path.join(data_dir, f"ace2_{hour_interval}h.nc")), 
+        fp = os.path.join(data_dir, f"ace2_{hour_interval}h.nc")
+        logger.debug(f"Polling ACE data in {fp}")
+        ds = polling2.poll(lambda: xr.load_dataset(fp), 
                         ignore_exceptions=(IOError, ValueError, FileNotFoundError), 
                         timeout=FIRST_POLL_TIMEOUT if self.poll_counter == 0 else POLLING_TIMEOUT,
                         step=0.1,
