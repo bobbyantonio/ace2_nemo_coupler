@@ -362,7 +362,7 @@ class FluxCalculator:
                  ocean_ds: xr.Dataset,
                  test_mode: bool=False) -> xr.Dataset:
 
-            
+
         if test_mode:
             flux_ds = []
             
@@ -502,12 +502,12 @@ class FluxCalculator:
                                                 data_dir, 
                                                 ocean_ds,
                                                 atmosphere_source)
-
-        sea_mask = ~np.isnan(ocean_ds['sea_surface_temperature'])
+        
         if self.ocean_source == 'era5':
-            _, sea_mask = xr.align(atmosphere_ds, sea_mask, join="override", copy=False)
-
+            _, ocean_ds = xr.align(atmosphere_ds, ocean_ds, join="override", copy=False)
             
+        sea_mask = ~np.isnan(ocean_ds['sea_surface_temperature'])
+    
         
         if atmosphere_source == 'era5':
             # Flux variables taken directly from ERA5
@@ -1267,8 +1267,10 @@ if __name__ == "__main__":
             
         logger.info(f'sending fields took {time.time() - start}s')
         if not args.test_mode:
-            output_vars = list(flux_ds.data_vars)
-            flux_ds[output_vars].assign_coords(time=[dt]).to_netcdf(os.path.join(args.router_data_directory, f"atm2oce_{dt.strftime('%Y%m%d-%H')}_{args.atmosphere_source}_{args.ocean_source}{'_debug' if args.debug else ''}.nc"))
+            output_ds = flux_ds.copy()
+            if 'flag' in flux_ds.data_vars:
+                output_ds = flux_ds.drop_vars('flag', errors='ignore')
+            output_ds.assign_coords(time=[dt]).to_netcdf(os.path.join(args.router_data_directory, f"atm2oce_{dt.strftime('%Y%m%d-%H')}_{args.atmosphere_source}_{args.ocean_source}{'_debug' if args.debug else ''}.nc"))
         logger.debug(f'Wrote file')
         
         time.sleep(0.05)

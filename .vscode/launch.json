@@ -39,6 +39,24 @@
             "--climatology-directory", "/ec/res4/hpcperm/ecme4254/era5/climatology",
             "--era5-directory", "/scratch/ecme4254/era5"]
         }, {
+            "name": "Python: test receiver (ace2-calculated)",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "/home/ecme4254/perm/repos/ace2_nemo_coupler/router.py",
+            "console": "integratedTerminal",
+            "justMyCode": false,
+            "args": ["--debug",
+            "--model-directory", "/network/group/aopp/predict/HMC005_ANTONIO_EERIE/predictions/ace2_1step/",
+            "--ocean-source", "era5",
+            "--router-data-directory", "/network/group/aopp/predict/HMC005_ANTONIO_EERIE/predictions/ace2_1step/19510101-00",
+            "--atmosphere-source", "ace2-calculated",
+            "--atmosphere-gridfile", "/network/group/aopp/predict/HMC005_ANTONIO_EERIE/ace2_data/grid.nc",
+            "--atmospheric-timestep-hrs", "6",
+            "--coupling-timestep-secs", "21600",
+            "--climatology-directory", "/network/group/aopp/predict/HMC005_ANTONIO_EERIE/era5/climatology",
+            "--era5-directory", "/network/group/aopp/predict/HMC005_ANTONIO_EERIE/era5",
+             "--start-from-era5", "--first-poll-timeout", "1", "--polling-timeout", "1"]
+        },{
             "name": "Python: test receiver (ace2-era5)",
             "type": "debugpy",
             "request": "launch",
@@ -74,6 +92,25 @@
             "--coupling-timestep-secs", "21600",
             "--climatology-directory", "/ec/res4/scratch/ecme4254/era5/climatology",
             "--era5-directory", "/ec/res4/scratch/ecme4254/era5"]
+        }, 
+                    {
+            "name": "Python: test receiver (era5-calculated)",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "/home/a/antonio/repos/ace2_nemo_coupler/router.py",
+            "console": "integratedTerminal",
+            "justMyCode": false,
+            "args": ["--debug",
+            "--model-directory", "/network/group/aopp/predict/HMC005_ANTONIO_EERIE/predictions/ace2_flux_comparison_1step/era5-calculated",
+            "--ocean-source", "era5",
+            "--router-data-directory", "/network/group/aopp/predict/HMC005_ANTONIO_EERIE/predictions/ace2_flux_comparison_1step/era5-calculated/test",
+            "--atmosphere-source", "era5-calculated",
+            "--atmosphere-gridfile", "/network/group/aopp/predict/HMC005_ANTONIO_EERIE/ace2_data/grid.nc",
+            "--atmospheric-timestep-hrs", "6",
+            "--coupling-timestep-secs", "21600",
+            "--climatology-directory", "/network/group/aopp/predict/HMC005_ANTONIO_EERIE/era5/climatology",
+            "--era5-directory", "/network/group/aopp/predict/HMC005_ANTONIO_EERIE/era5", "--start-from-era5", "--first-poll-timeout", "1", "--polling-timeout", "1",
+        "--initialisation-datetime", "19510201-06"]
         }, 
         {
             "name": "Python: test receiver (era5-ace2mimic)",
