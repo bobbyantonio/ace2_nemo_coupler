@@ -104,6 +104,8 @@ name_lookup = {'A_Evap_total': {'name':'Total evaporation', 'units': 'kg/m^2/s'}
                '10m_u_component_of_wind': {'name': '10m eastward wind', 'units': '$m s^{-1}$'},
                'instantaneous_eastward_turbulent_surface_stress': {'name': 'Eastward wind stress', 'units': '$Nm^{-2}$', 'abbrev': r'$\tau_{x}$'},
                 'instantaneous_northward_turbulent_surface_stress': {'name': 'Northward wind stress', 'units': '$Nm^{-2}$', 'abbrev': r'$\tau_{y}$'},
+               'eastward_momentum_flux': {'name': 'Eastward momentum flux', 'units': '$kg m^{-1} s^{-2}$', 'abbrev': r'$\tau_{x}$'},
+                'northward_momentum_flux': {'name': 'Northward momentum flux', 'units': '$kg m^{-1} s^{-2}$', 'abbrev': r'$\tau_{y}$'},
                 'total_heat_flux': {'name': 'Total heat flux', 'units': '$Wm^{-2}$', 'abbrev': 'Total HF'},
                'total_heat_flux_oce': {'name': 'Total heat flux (ocean)', 'units': '$Wm^{-2}$', 'abbrev': 'Total HF (oce)'},
                'mean_surface_heat_flux': {'name': 'Latent + sensible heat flux', 'units': '$Wm^{-2}$', 'abbrev': 'LHF + SHF'}
@@ -444,6 +446,7 @@ def plot_map_grid(da_grid,
     cbar_max_width is the maximum colorbar width in subplot-width units.
     If bottom_row_colorbars is True, show colorbars only below the last row.
     """
+    
     num_rows = len(da_grid)
     if num_rows == 0 or not da_grid[0]:
         raise ValueError("da_grid must contain at least one row and column")
@@ -463,6 +466,7 @@ def plot_map_grid(da_grid,
     for group in groups:
         if group != list(range(min(group), max(group) + 1)):
             raise ValueError("Each column group must contain contiguous columns")
+    group_lookup = {m:n for n in range(len(groups)) for m in groups[n]}
 
     if bottom_row_colorbars:
         grid_rows = num_rows + 1
@@ -507,9 +511,9 @@ def plot_map_grid(da_grid,
             ax = plot_axs[row][col]
             im = da_grid[row][col].plot(
                 ax=ax,
-                vmax=vmax_vals[row],
-                vmin=vmin_vals[row],
-                cmap=cmaps[row],
+                vmax=vmax_vals[row][group_lookup[col]],
+                vmin=vmin_vals[row][group_lookup[col]],
+                cmap=cmaps[row][group_lookup[col]],
                 add_colorbar=False,
                 rasterized=True,
                 transform=ccrs.PlateCarree(),
@@ -535,22 +539,22 @@ def plot_map_grid(da_grid,
 
         if not bottom_row_colorbars or row == num_rows - 1:
             cbar_row = num_rows if bottom_row_colorbars else 2 * row + 1
-            for group in groups:
+            for group_ix, group in enumerate(groups):
                 colorbar_ax = fig.add_subplot(
                     gs[cbar_row, min(group):max(group) + 1]
                 )
-                colorbar_axes.append((colorbar_ax, row, group))
+                colorbar_axes.append((colorbar_ax, row, group_ix))
 
     # Measure subplot widths, then cap and center each colorbar.
     fig.canvas.draw()
     subplot_width = plot_axs[0][0].get_position().width
     fig.set_constrained_layout(False)
 
-    for colorbar_ax, row, group in colorbar_axes:
+    for colorbar_ax, row, group_ix in colorbar_axes:
         plt.colorbar(
-            row_images[row][group[0]],
+            row_images[row][groups[group_ix][0]],
             cax=colorbar_ax,
-            label=cbar_labels[row],
+            label=cbar_labels[row][group_ix],
             orientation="horizontal",
         )
         colorbar_ax.tick_params(labelsize=10)
