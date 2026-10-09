@@ -5,7 +5,7 @@
 #       extension: .py
 #       format_name: percent
 #       format_version: '1.3'
-#       jupytext_version: 1.16.6
+#       jupytext_version: 1.19.5
 #   kernelspec:
 #     display_name: ece4
 #     language: python
@@ -55,7 +55,7 @@ ranges = {'A_Qns_ice': [-300,300],
          'A_Evap_total': [-0.0001, 0.0001]}
 
 # %%
-atm_types = ['ace2', 'ace2-calculated', 'era5', 'era5-calculated']
+atm_types = ['ace2', 'ace2-calculated', 'era5', 'era5-calculated', 'era5-calculated-Rb']
 atmospheric_ds_list_dict = {atm_type: [] for atm_type in atm_types}
 oce_ds_list_dict = {atm_type: [] for atm_type in atm_types}
 
@@ -70,6 +70,8 @@ for year in tqdm(range(1951, 1956)):
             for atm_type in atm_types:
                 if atm_type == 'ace2':
                     suffix = 'ace2_6h.nc'
+                elif atm_type == 'era5-calculated-Rb':
+                    suffix = f"atm2oce_{target_dt.strftime('%Y%m%d-%H')}_era5-calculated_era5_debug.nc"
                 else:
                     suffix = f"atm2oce_{target_dt.strftime('%Y%m%d-%H')}_{atm_type}_era5_debug.nc"
                 
@@ -94,8 +96,11 @@ for year in tqdm(range(1951, 1956)):
             for atm_type in atm_types:
                 if atm_type in ['ace2', 'ace2-calculated']:
                     suffix = f"oce2atm_6h_{atm_type}_era5_debug.nc"
+                elif atm_type == 'era5-calculated-Rb':
+                    suffix = f"oce2atm_{target_dt.strftime('%Y%m%d-%H')}_era5-calculated_era5_debug.nc"
                 else:
                     suffix = f"oce2atm_{target_dt.strftime('%Y%m%d-%H')}_{atm_type}_era5_debug.nc"
+                
                     
                 tmp_ocean_ds = xr.load_dataset(f"{BASE_DIR}/{atm_type}/{init_dt.strftime('%Y%m%d-%H')}/{suffix}")
                 
@@ -228,7 +233,7 @@ name_lookup = {'A_Evap_total': {'name':'Total evaporation', 'units': 'kg/m^2/s'}
 }
 
 # %%
-for atm_type in ['era5', 'era5-calculated', 'ace2-calculated']:
+for atm_type in ['era5', 'era5-calculated','era5-calculated-Rb','ace2-calculated']:
     for direction in ['eastward', 'northward']:
         flux_var = f"{direction}_momentum_flux"
         stress_var = f"instantaneous_{direction}_turbulent_surface_stress"
@@ -261,10 +266,11 @@ fig, plot_axs, colorbar_axes, row_images = plot_map_grid(da_grid,
                                   projection=ccrs.Robinson(central_longitude=180),
                                   cmaps=cmaps,
                                   column_groups=[[0,1], [2]],
-                                width_height_ratio = [6,4],
-                                shrink_factor= 0.8,
-                                wspace=0.001,
-                                cbar_height_ratio=0.02,
+                                width_height_ratio = [5,4],
+                                  shrink_factor= 0.8,
+                                  wspace=0.1,
+                                  cbar_height_ratio=0.02,
+                                  cbar_pad=0.1
 )
 
 # Change ticks of the last colorbars
@@ -293,6 +299,155 @@ colorbar_ax.set_xticklabels([0.2, 0.1, 0, -0.1, -0.2])
 plt.savefig(os.path.join(FIGURES_DIR, "era5_vs_airseafluxcode_stress_comparison.pdf"), bbox_inches='tight')
 
 # %%
+from matplotlib import colorbar, colors, gridspec
+
+_, sea_mask = xr.align( atmospheric_ds_dict['era5']['mean_surface_latent_heat_flux'].mean('time'), sea_mask, join='override')
+
+plot_vars = [ 'eastward_momentum_flux', 'northward_momentum_flux', 'evaporation']
+da_grid = [ [xr.where(sea_mask, atmospheric_ds_dict['era5'][varname].mean('time').transpose('latitude', 'longitude'), np.nan), 
+             xr.where(sea_mask, atmospheric_ds_dict['era5-calculated-Rb'][varname].mean('time').transpose('latitude', 'longitude'), np.nan),
+             xr.where(sea_mask, atmospheric_ds_dict['era5-calculated-Rb'][varname].mean('time').transpose('latitude', 'longitude') - atmospheric_ds_dict['era5'][varname].mean('time').transpose('latitude', 'longitude'), np.nan)] for varname in plot_vars]
+
+cbar_labels= [[f"{name_lookup[varname]['name']} [{name_lookup[varname]['units']}]", f"Mean bias [{name_lookup[varname]['units']}]"] for varname in plot_vars]
+titles_grid = [['a) ERA5', 'b) AirSeaFluxCode(ERA5)-Rb', 'c) AirSeaFluxCode(ERA5) - ERA5'], 
+               ['d) ERA5', 'e) AirSeaFluxCode(ERA5)-Rb', 'f) AirSeaFluxCode(ERA5) - ERA5'],
+               ['g) ERA5', 'h) AirSeaFluxCode(ERA5)-Rb', 'i) AirSeaFluxCode(ERA5) - ERA5']]
+vmax_vals = [np.array([0.5, 0.05]), np.array([0.2, 0.015]), np.array([10e-5, 2e-5])]
+vmin_vals = [-1*arr for arr in vmax_vals]
+cmaps = [['RdBu_r', 'RdBu_r'] for varname in plot_vars]
+
+fig, plot_axs, colorbar_axes, row_images = plot_map_grid(da_grid,
+                                cbar_labels,
+                                titles_grid ,
+                                vmax_vals,
+                                vmin_vals,
+                                  projection=ccrs.Robinson(central_longitude=180),
+                                  cmaps=cmaps,
+                                  column_groups=[[0,1], [2]],
+                                width_height_ratio = [5,4],
+                                  shrink_factor= 0.8,
+                                  wspace=0.1,
+                                  cbar_height_ratio=0.02,
+                                  cbar_pad=0.1
+)
+
+# Change ticks of the last colorbars
+colorbar_ax = colorbar_axes[-2][0]
+plt.colorbar(
+            row_images[-1][0],
+            cax=colorbar_ax,
+            label='Evaporation [$10^{-4} kg m^{-2} s^{-1}$]',
+            orientation="horizontal",
+        )
+
+colorbar_ax.set_xticks([1e-4, 0.5e-4, 0, -0.5e-4, -1e-4])
+colorbar_ax.set_xticklabels([1, 0.5, 0, -0.5, -1])
+
+colorbar_ax = colorbar_axes[-1][0]
+plt.colorbar(
+            row_images[-1][-1],
+            cax=colorbar_ax,
+            label='Evaporation [$10^{-4} kg m^{-2} s^{-1}$]',
+            orientation="horizontal",
+        )
+
+colorbar_ax.set_xticks([2e-5, 1e-5, 0, -1e-5, -2e-5])
+colorbar_ax.set_xticklabels([0.2, 0.1, 0, -0.1, -0.2])
+
+
+
+# %%
+a=1
+
+# %%
+from matplotlib import colorbar, colors, gridspec
+
+_, sea_mask = xr.align( atmospheric_ds_dict['era5']['mean_surface_latent_heat_flux'].mean('time'), sea_mask, join='override')
+_, sea_mask2 = xr.align( atmospheric_ds_dict['ace2-calculated']['mean_surface_latent_heat_flux'].mean('time'), sea_mask, join='override')
+
+plot_vars = [ 'mean_surface_latent_heat_flux', 'mean_surface_sensible_heat_flux',  'eastward_momentum_flux', 'northward_momentum_flux', 'evaporation']
+
+da_grid = []
+for v in plot_vars:
+    era5_da = xr.where(sea_mask, atmospheric_ds_dict['era5'][v].mean('time').transpose('latitude', 'longitude'), np.nan)
+    ace2c_da = xr.where(sea_mask2, atmospheric_ds_dict['ace2-calculated'][v].mean('time').transpose('latitude', 'longitude'), np.nan)
+    era5_da = xr.align(ace2c_da, era5_da, join='override')[1]
+    da_grid.append([era5_da, ace2c_da, ace2c_da - xr.align(era5_da, ace2c_da, join='override')[0]])
+
+cbar_labels= [[f"{name_lookup[varname]['name']} [{name_lookup[varname]['units']}]", f"Mean bias [{name_lookup[varname]['units']}]"] for varname in plot_vars]
+titles_grid = [['a) ERA5', 'b) AirSeaFluxCode(ACE2)', 'c) AirSeaFluxCode(ACE2) - ERA5'], 
+               ['d) ERA5', 'e) AirSeaFluxCode(ACE2)', 'f) AirSeaFluxCode(ACE2) - ERA5'],
+               ['g) ERA5', 'h) AirSeaFluxCode(ACE2)', 'i) AirSeaFluxCode(ACE2) - ERA5'],
+               ['j) ERA5', 'k) AirSeaFluxCode(ACE2)', 'l) AirSeaFluxCode(ACE2) - ERA5'],
+               ['m) ERA5', 'n) AirSeaFluxCode(ACE2)', 'o) AirSeaFluxCode(ACE2) - ERA5']]
+
+np.array([0.5, 0.05]), np.array([0.2, 0.015])
+vmax_vals = [np.array([300, 50]), np.array([75, 10]), np.array([0.5, 0.05]), np.array([0.2, 0.015]), np.array([10e-5, 2e-5])]
+vmin_vals = [-1*arr for arr in vmax_vals]
+cmaps = [['RdBu_r', 'RdBu_r'] for varname in plot_vars]
+
+fig, plot_axs, colorbar_axes, row_images = plot_map_grid(da_grid,
+                                cbar_labels,
+                                titles_grid ,
+                                vmax_vals,
+                                vmin_vals,
+                                  projection=ccrs.Robinson(central_longitude=180),
+                                  cmaps=cmaps,
+                                  column_groups=[[0,1], [2]],
+                                width_height_ratio = [5,4],
+                                  shrink_factor= 0.8,
+                                  wspace=0.1,
+                                  cbar_height_ratio=0.02,
+                                  cbar_pad=0.1
+)
+
+# Change ticks of the last colorbars
+colorbar_ax = colorbar_axes[-2][0]
+plt.colorbar(
+            row_images[-1][0],
+            cax=colorbar_ax,
+            label='Evaporation [$10^{-4} kg m^{-2} s^{-1}$]',
+            orientation="horizontal",
+        )
+
+colorbar_ax.set_xticks([1e-4, 0.5e-4, 0, -0.5e-4, -1e-4])
+colorbar_ax.set_xticklabels([1, 0.5, 0, -0.5, -1])
+
+colorbar_ax = colorbar_axes[-1][0]
+plt.colorbar(
+            row_images[-1][-1],
+            cax=colorbar_ax,
+            label='Evaporation [$10^{-4} kg m^{-2} s^{-1}$]',
+            orientation="horizontal",
+        )
+
+colorbar_ax.set_xticks([2e-5, 1e-5, 0, -1e-5, -2e-5])
+colorbar_ax.set_xticklabels([0.2, 0.1, 0, -0.1, -0.2])
+
+plt.savefig(os.path.join(FIGURES_DIR, "era5_vs_airseafluxcode_ace2_flux_comparison.pdf"), bbox_inches='tight')
+
+# %%
+import sys, os
+import numpy as np
+import xarray as xr
+import datetime as dt
+import matplotlib.pyplot as plt
+import cartopy.crs as ccrs
+import xarray_regrid
+from tqdm import tqdm
+
+sys.path.append('/home/a/antonio/repos/ace2_nemo_coupler')
+from notebooks.plotting import plot_maps_shared_colorbar, plot_map_grid_cbar_by_row, name_lookup, plot_map_grid
+
+BASE_DIR="/network/group/aopp/predict/HMC005_ANTONIO_EERIE/predictions/ace2_flux_comparison_1step"
+FIGURES_DIR="/home/a/antonio/repos/ace2_nemo_coupler/notebooks/mamuscript_figures"
+sea_mask = xr.load_dataarray("/network/group/aopp/predict/HMC005_ANTONIO_EERIE/ace2_data/era5_sea_mask_ACE2.nc")
+grid = xr.load_dataarray("/network/group/aopp/predict/HMC005_ANTONIO_EERIE/ace2_data/grid.nc")
+
+sea_mask = xr.align(sea_mask, grid, join='override')[0]
+
+# %%
+
 era5_snowfall = xr.load_dataarray("/network/group/aopp/predict/HMC005_ANTONIO_EERIE/era5/surface/era5_snowfall.nc").sortby('latitude', ascending=True).sortby('longitude', ascending=True)
 
 # convert to kg/m2/s
@@ -313,9 +468,9 @@ titles_grid = [['a) ERA5', 'b) Heuristic', 'c) Heuristic - ERA5'],
                ['d) ERA5', 'e) Heuristic', 'f) Heuristic - ERA5']]
 # vmax_vals = [np.array([0.5, 0.05]), np.array([0.2, 0.02])]
 # vmin_vals = [-1*arr for arr in vmax_vals]
-vmax_vals = [[5e-5, 2e-5]]
+vmax_vals = [[3e-5, 2e-5]]
 vmin_vals = [[0,-2e-5]]
-cmaps = [['viridis', 'RdBu_r'] for varname in plot_vars]
+cmaps = [['Blues', 'RdBu_r'] for varname in plot_vars]
 
 plot_map_grid(da_grid,
                                 cbar_labels,
@@ -326,9 +481,12 @@ plot_map_grid(da_grid,
                                   cmaps=cmaps,
                                   column_groups=[[0,1], [2]],
                                 width_height_ratio = [5,4],
-                                shrink_factor= 0.8,
-                                wspace=0.001,
-                                cbar_height_ratio=0.02,
+                                  shrink_factor= 0.8,
+                                  wspace=0.1,
+                                  cbar_height_ratio=0.02,
+                                  cbar_pad=0.1
 )
 
 plt.savefig(os.path.join(FIGURES_DIR, "solid_precip_comparison.pdf"), bbox_inches='tight')
+
+# %%

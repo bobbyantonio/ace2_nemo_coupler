@@ -310,13 +310,16 @@ def plot_map_grid(da_grid,
                  lat_ticks=None,
                  lon_ticks=None,
                  cbar_max_width=1.0,
-                 bottom_row_colorbars=False):
+                 bottom_row_colorbars=False,
+                 cbar_pad=None):
     """Plot a map grid with colorbars shared by specified column groups.
 
     column_groups contains contiguous, zero-based column indices, for example
     [[0, 1], [2]] to share colorbars across columns 0–1 and column 2.
     cbar_max_width is the maximum colorbar width in subplot-width units.
     If bottom_row_colorbars is True, show colorbars only below the last row.
+    cbar_pad is the gap in inches between the bottom of the maps (including
+    tick labels) and the colorbar. If None, the gridspec position is kept.
     """
     
     num_rows = len(da_grid)
@@ -354,6 +357,7 @@ def plot_map_grid(da_grid,
             num_rows * shrink_factor * width_height_ratio[1],
         ),
     )
+    fig.tight_layout(pad=0.1)
     gs = gridspec.GridSpec(
         grid_rows,
         num_cols,
@@ -422,6 +426,14 @@ def plot_map_grid(da_grid,
     subplot_width = plot_axs[0][0].get_position().width
     fig.set_constrained_layout(False)
 
+    # Bottom of each map (including tick labels), in figure coordinates.
+    renderer = fig.canvas.get_renderer()
+    to_fig = fig.transFigure.inverted()
+    map_bottoms = [
+        [ax.get_tightbbox(renderer).transformed(to_fig).y0 for ax in row_axs]
+        for row_axs in plot_axs
+    ]
+
     for colorbar_ax, row, group_ix in colorbar_axes:
         plt.colorbar(
             row_images[row][groups[group_ix][0]],
@@ -433,9 +445,13 @@ def plot_map_grid(da_grid,
 
         bbox = colorbar_ax.get_position()
         width = min(bbox.width, cbar_max_width * subplot_width)
+        y0 = bbox.y0
+        if cbar_pad is not None:
+            group_bottom = min(map_bottoms[row][col] for col in groups[group_ix])
+            y0 = group_bottom - cbar_pad / fig.get_figheight() - bbox.height
         colorbar_ax.set_position([
             bbox.x0 + (bbox.width - width) / 2,
-            bbox.y0,
+            y0,
             width,
             bbox.height,
         ])
@@ -460,7 +476,9 @@ def plot_map_grid_cbar_by_column(da_grid,
     num_rows = len(da_grid)
     num_cols = len(da_grid[0])
     
-    fig = plt.figure(constrained_layout=True, figsize=(num_cols*shrink_factor*width_height_ratio[0], num_rows*shrink_factor*width_height_ratio[1]))
+    fig = plt.figure(constrained_layout=True, 
+                     figsize=(num_cols*shrink_factor*width_height_ratio[0], 
+                              num_rows*shrink_factor*width_height_ratio[1]))
     
     gs = gridspec.GridSpec(num_rows + 1, num_cols, figure=fig, 
                           width_ratios=[1]* num_cols,
