@@ -252,7 +252,7 @@ def get_era5_fluxes(data_dir, dt, base_dataarray):
             tmp_da = tmp_da * 1000 / 3600   
 
         flux_ds.append(tmp_da)
-    flux_ds = xr.merge(flux_ds)
+    flux_ds = xr.merge(flux_ds, compat='no_conflicts')
     
     if 'latitude' in flux_ds.coords:
         flux_ds = flux_ds.regrid.linear(base_dataarray)
@@ -309,8 +309,9 @@ class FluxCalculator:
                  polling_timeout: int,
                  coastal_ice_flux_masking: bool=True,
                  start_from_era5: bool=False,
-                 infer_solid_precipitation: bool=True):
-        
+                 infer_solid_precipitation: bool=True,
+                 roughness_length_calculation: str='tsrv'):
+
         self.start_datetime = start_datetime
         self.coupling_timestep_hrs = coupling_timestep_hrs
         self.coupling_timestep_s = 3600 * coupling_timestep_hrs
@@ -330,6 +331,7 @@ class FluxCalculator:
         self.start_from_era5 = start_from_era5
         self.coastal_ice_flux_masking = coastal_ice_flux_masking
         self.infer_solid_precipitation = infer_solid_precipitation
+        self.roughness_length_calculation = roughness_length_calculation
         self.first_poll_timeout = first_poll_timeout
         self.polling_timeout = polling_timeout
         
@@ -514,7 +516,7 @@ class FluxCalculator:
             
             flux_ds = get_era5_fluxes(data_dir, dt, self.base_dataarray)
             
-            flux_ds = xr.merge([flux_ds, atmosphere_ds])
+            flux_ds = xr.merge([flux_ds, atmosphere_ds], compat='no_conflicts')
         
         elif atmosphere_source in ['gencast', 'era5-calculated']:
 
@@ -635,11 +637,14 @@ class FluxCalculator:
                             'instantaneous_eastward_turbulent_surface_stress',
                             'instantaneous_northward_turbulent_surface_stress'
                             ]
+
+                # TODO: see if we can do better than filling with mean
                 flux_ds = calculated_flux_ds[flux_vars]
-            
-                # TODO: see if we can do better than this
-                flux_ds = calculated_flux_ds.fillna(calculated_flux_ds.mean())
+                flux_ds = flux_ds.fillna(flux_ds.mean())
                 
+                # Add a dummy variable to check that the computation has passed through the flux calculation step
+                flux_ds['flux_calculation_passed'] = xr.ones_like(flux_ds['mean_surface_sensible_heat_flux'])
+                    
                 flux_ds['mean_surface_net_short_wave_radiation_flux'] = solar_flux_over_ocean(atmosphere_ds, ocean_ds)
             
                 # Calculated fluxes over ice
@@ -699,9 +704,10 @@ class FluxCalculator:
                                 
         elif atmosphere_source == 'gencast':
             ds = self.get_atmospheric_fields_gencast(dt, data_dir)
-        elif atmosphere_source in ['ace2', 'ace2-calculated']:
-            ds = self.get_atmospheric_fields_ace2(dt, data_dir)
-        
+        elif atmosphere_source == 'ace2':
+            ds = self.get_atmospheric_fields_ace2(dt, data_dir, flux_calculation=False)
+        elif atmosphere_source == 'ace2-calculated':
+            ds = self.get_atmospheric_fields_ace2(dt, data_dir, flux_calculation=True)
         ds = ds.sel(latitude=self.latitude_vals, longitude=self.longitude_vals)
         
         if atmosphere_source in ['era5-calculated', 'gencast', 'era5-ace2mimic']:
@@ -748,7 +754,7 @@ class FluxCalculator:
             tmp_da = xr.load_dataarray(os.path.join(data_dir, 'surface', era5_var, f"era5_{era5_var}_{dt.strftime('%Y%m%d')}.nc")).sel(time=dt)
             tmp_da.name = era5_var
             surface_ds.append(tmp_da)
-        surface_ds = xr.merge(surface_ds)
+        surface_ds = xr.merge(surface_ds, compat='no_conflicts')
     
         # Convert precip to kg/m^2/s flux, by multiplying by density of water (1000 kg/m^3) and dividing by 3600 seconds in an hour
         surface_ds['total_precipitation'] = surface_ds['total_precipitation'] * 1000 / (3600)
@@ -760,11 +766,11 @@ class FluxCalculator:
 
                 fps = [os.path.join(data_dir, 'plevels', era5_var, f'{pl}hPa', f"era5_{era5_var}_{dt.strftime('%Y%m%d')}.nc") for pl in [1000, 975]]
                 plevel_ds.append(xr.open_mfdataset(fps, combine='nested', preprocess = lambda x: x.sel(time=dt), concat_dim='pressure_level'))
-            plevel_ds = xr.merge(plevel_ds).rename({'z': 'geopotential',
+            plevel_ds = xr.merge(plevel_ds,compat='no_conflicts').rename({'z': 'geopotential',
                                                     'q': 'specific_humidity',
                                                     'pressure_level': 'level'})
             
-            return xr.merge([surface_ds, plevel_ds])
+            return xr.merge([surface_ds, plevel_ds], compat='no_conflicts')
         else:
             return surface_ds
 
@@ -806,12 +812,12 @@ class FluxCalculator:
 
     def get_atmospheric_fields_ace2(self,
                                     dt: datetime.datetime,
-                                    data_dir: str) -> xr.Dataset:
+                                    data_dir: str,
+                                    flux_calculation: bool = False) -> xr.Dataset:
 
         hour_interval = int((dt - self.start_datetime).total_seconds() / 3600)
 
         fp = os.path.join(data_dir, f'ace2_{hour_interval}h.nc')
-        logger.debug(f"Polling ACE data in {fp}")
         try:
             ds = polling2.poll(lambda: xr.load_dataset(fp), 
                             ignore_exceptions=(IOError, ValueError, FileNotFoundError), 
@@ -847,6 +853,10 @@ class FluxCalculator:
                         'TMP2m': '2m_temperature',
                         'Q2m': 'specific_humidity_surface',
                         'PRESsfc': 'mean_sea_level_pressure'})
+        
+        if flux_calculation:
+            ds = ds.drop_vars(['mean_surface_latent_heat_flux', 'mean_surface_sensible_heat_flux'])
+            
         return ds
     
     def calculate_fluxes(self,
@@ -910,7 +920,7 @@ class FluxCalculator:
                             Rs=flux_df['mean_surface_downward_short_wave_radiation_flux'].to_numpy(),
                             Rl=flux_df['mean_surface_downward_long_wave_radiation_flux'].to_numpy(),
                             tol=['all', 0.01, 0.01, 1e-05, 1e-3, 0.1, 0.1],
-                            L="tsrv",
+                            L=self.roughness_length_calculation,
                             out=0,
                             wl=1,
                             out_var=out_vars)
@@ -974,7 +984,8 @@ if __name__ == "__main__":
     parser.add_argument('--debug', action="store_true",
                         help="activate debugging")
     parser.add_argument('--test-mode', action="store_true",
-                        help="activate test mode, where forcing fluxes are replaced by constant shapes")                   
+                        help="activate test mode, where forcing fluxes are replaced by constant shapes")  
+    parser.add_argument('--roughness-length-calculation', type=str, choices=['tsrv', 'Rb'], default='tsrv',)                 
     args = parser.parse_args()
     
     # if args.debug:
@@ -1046,7 +1057,7 @@ if __name__ == "__main__":
         if args.ocean_source != 'era5':
             os.makedirs(args.router_data_directory, exist_ok=True)
     
-    if len(date0) == 8:
+    if len(str(date0)) == 8:
         date0 = f"{date0}-00"
         
     start_datetime = datetime.datetime.strptime(str(date0), '%Y%m%d-%H')
@@ -1146,7 +1157,8 @@ if __name__ == "__main__":
                     coastal_ice_flux_masking=not args.no_coastal_ice_flux_masking,
                     infer_solid_precipitation=not args.no_solid_precip,
                     first_poll_timeout=args.first_poll_timeout,
-                    polling_timeout=args.polling_timeout
+                    polling_timeout=args.polling_timeout,
+                    roughness_length_calculation=args.roughness_length_calculation
                 )
 
     for n in range(n_coupling_steps + 1):
