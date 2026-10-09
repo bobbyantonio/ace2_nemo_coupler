@@ -423,7 +423,222 @@ def calculate_en34(input_sst_da,
                         nino_region=3.4)
 
 
+
+def remove_polynomial_trend(
+    da: xr.DataArray,
+    deg: int = 2,
+    dim: str = "time",
+    return_trend: bool = False,
+    keep_mean: bool = True,
+):
+    """
+    Remove a slowly varying polynomial trend along a time dimension.
+
+    Parameters
+    ----------
+    da : xr.DataArray
+        Monthly data with a datetime-like coordinate along `dim`.
+    deg : int
+        Polynomial degree. For 70 years, 2–4 captures multidecadal trends
+        without fitting decadal variability.
+    dim : str
+        Name of the time dimension.
+    return_trend : bool
+        If True, also return the fitted trend.
+    keep_mean : bool
+        If True, add the time-mean back so the detrended data keeps its
+        original mean level (only the variation over time is removed).
+
+    Returns
+    -------
+    detrended : xr.DataArray
+    trend : xr.DataArray (only if return_trend=True)
+    """
+    time = da[dim]
+
+    # Decimal years, centred and scaled to roughly [-1, 1] for conditioning
+    t = time.dt.year + (time.dt.dayofyear - 1) / 365.25
+    t_scaled = (t - t.mean()) / (t.max() - t.min()) * 2
+
+    da_fit = da.assign_coords(_t=(dim, t_scaled.values)).swap_dims({dim: "_t"})
+
+    coeffs = da_fit.polyfit(dim="_t", deg=deg, skipna=True).polyfit_coefficients
+    trend = xr.polyval(da_fit["_t"], coeffs)
+
+    # Restore the original time dimension and coordinates
+    trend = trend.swap_dims({"_t": dim}).drop_vars("_t").assign_coords({dim: time})
+    trend = trend.transpose(*da.dims)
+
+    # Keep NaNs (e.g. land points) where the input has them
+    trend = trend.where(da.notnull())
+
+    detrended = da - trend
+    if keep_mean:
+        detrended = detrended + trend.mean(dim)
+
+    detrended.attrs = da.attrs
+    if return_trend:
+        return detrended, trend
+    return detrended
+
+def relative_nino34(
+    sst: xr.DataArray,
+    lat_name: str = "latitude",
+    lon_name: str = "longitude",
+    time_dim: str = "time",
+    area: xr.DataArray | None = None,
+    clim_period: tuple[str, str] | None = None,
+    smooth: int = 3,
+    return_components: bool = False,
+):
+    """
+    Relative Niño-3.4 index (RONI).
+
+    Parameters
+    ----------
+    sst : xr.DataArray
+        Monthly SST with a time dimension and lat/lon coordinates. The
+        coordinates can be 1D (regular grid) or 2D (e.g. NEMO nav_lat/nav_lon).
+        Land points must be NaN, not 0.
+    lat_name, lon_name : str
+        Names of the latitude and longitude coordinates.
+    time_dim : str
+        Name of the time dimension.
+    area : xr.DataArray, optional
+        Cell areas (e.g. NEMO e1t*e2t) used as weights. If None, cos(lat)
+        is used.
+    clim_period : (start, end), optional
+        Period for the monthly climatology, e.g. ("1981", "2010").
+        If None, the full record is used.
+    smooth : int
+        Running-mean window in months (3 gives an ONI-style index; 1 means
+        no smoothing).
+    return_components : bool
+        If True, also return the Niño-3.4 and tropical-mean anomalies.
+
+    Returns
+    -------
+    roni : xr.DataArray
+    (nino34_anom, tropical_anom) if return_components=True
+    """
+    lat = sst[lat_name]
+    lon = sst[lon_name] % 360  # handle -180..180 and 0..360 conventions
+
+    if area is None:
+        weights = np.cos(np.deg2rad(lat))
+    else:
+        weights = area
+    weights = weights.fillna(0)
+
+    spatial_dims = [d for d in sst.dims if d != time_dim]
+
+    def _box_mean(mask):
+        w = weights.where(mask, 0)
+        return sst.where(mask).weighted(w).mean(spatial_dims)
+
+    nino34_mask = (lat >= -5) & (lat <= 5) & (lon >= 190) & (lon <= 240)
+    tropics_mask = (lat >= -20) & (lat <= 20)
+
+    nino34 = _box_mean(nino34_mask)
+    tropics = _box_mean(tropics_mask)
+
+    def _anom(ts):
+        ref = ts if clim_period is None else ts.sel({time_dim: slice(*clim_period)})
+        clim = ref.groupby(f"{time_dim}.month").mean()
+        return (ts.groupby(f"{time_dim}.month") - clim).drop_vars("month")
+
+    nino34_anom = _anom(nino34)
+    tropics_anom = _anom(tropics)
+
+    rel = nino34_anom - tropics_anom
+    # Rescale so the variance matches the conventional Niño-3.4 anomaly
+    rel = rel * (nino34_anom.std(time_dim) / rel.std(time_dim))
+
+    if smooth > 1:
+        rel = rel.rolling({time_dim: smooth}, center=True).mean()
+
+    rel.name = "roni"
+    rel.attrs = {
+        "long_name": "Relative Nino-3.4 index",
+        "units": sst.attrs.get("units", "K"),
+        "description": (
+            "Nino-3.4 SST anomaly minus 20S-20N mean SST anomaly, "
+            f"rescaled to Nino-3.4 variance, {smooth}-month running mean"
+        ),
+    }
+
+    if return_components:
+        return rel, nino34_anom, tropics_anom
+    return rel
+
+import numpy as np
+from scipy.signal import welch
+
+def calculate_en34_spectra(
+    da,
+    fs=12,                  # samples/year for monthly Niño 3.4
+    nperseg=None,
+    nfft=None,
+    scaling="density",
+    poly_detrend=2
+):
+    """
+    Calculate the power spectral density of a Niño 3.4 time series
+    using Welch's method.
+
+    Parameters
+    ----------
+    da : xarray.DataArray
+        1-D Niño 3.4 time series.
+    fs : float, default=12
+        Sampling frequency. For monthly data, fs=12 samples/year.
+    nperseg : int, optional
+        Length of each Welch segment. If None, uses up to 256 samples.
+    nfft : int, optional
+        FFT length. If None, uses nperseg.
+    scaling : {'density', 'spectrum'}, default='density'
+        Scaling passed to scipy.signal.welch.
+
+    Returns
+    -------
+    freq : ndarray
+        Frequency in cycles/year (if fs=12 for monthly data).
+    psd : ndarray
+        Power spectral density.
+    """
+
+    # Remove linear trend (also removes the mean/intercept)
+    da = remove_polynomial_trend(da, deg=poly_detrend, keep_mean=True)
+    # Convert to numpy and remove missing values
+    
+    x = np.asarray(da.values)
+    x = x[np.isfinite(x)]
+
+
+    # Welch parameters
+    if nperseg is None:
+        nperseg = min(256, len(x))
+    else:
+        nperseg = min(nperseg, len(x))
+
+    if nfft is None:
+        nfft = nperseg
+
+    freq, psd = welch(
+        x,
+        fs=fs,
+        window="hann",
+        nperseg=nperseg,
+        noverlap=nperseg // 2,
+        nfft=nfft,
+        detrend=False,      # already detrended above
+        scaling=scaling,
+    )
+
+    return freq, psd
+    
 def calculate_nino_index(input_sst_da, 
+                         detrend=True,
                            remove_seasonal_cycle=True, 
                            rolling_window=None,
                              resolution=1.0,

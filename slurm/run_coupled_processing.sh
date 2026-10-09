@@ -28,7 +28,7 @@ python -m notebooks.process_model_run --experiment-id n3.6_ace2_1951_control_com
 
 # python -m notebooks.process_model_run --experiment-id n3.6_ace2_no_icefluxmask_19510101-19530101 --ensemble-members 0 --model-run-dir /home/ecme4254/hpcperm/model_runs;
 
-python -m notebooks.process_model_run --experiment-id n3.6_ace2_spinupCMIP6_laplacian_19510101-20210101 --ensemble-members 0 --model-run-dir /home/ecme4254/hpcperm/model_runs;
+# python -m notebooks.process_model_run --experiment-id n3.6_ace2_spinupCMIP6_laplacian_19510101-20210101 --ensemble-members 0 --model-run-dir /home/ecme4254/hpcperm/model_runs;
 
 # python -m notebooks.process_model_run --experiment-id n3.6_ace2_1951_3hrTimestepCORE_19510101-20210101 --ensemble-members 0 --model-run-dir /home/ecme4254/hpcperm/model_runs;
 

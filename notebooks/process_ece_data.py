@@ -48,7 +48,7 @@ sys.path.append('/home/users/bantonio/repos/ace2_nemo_coupler')
 from notebooks.coupling_processing_utils import detrend_dataarray, \
     load_ece3_data, convert_dts_to_first_of_month, calculate_en34, calculate_linear_relationship, \
     mean_areas, calculate_en34_spectra, calculate_correlation, OLEVEL_VALUES, calculate_lagged_correlations, calculate_anomalies, \
-    bjerknes_feedback_analysis, calculate_nino_index, is_notebook, ece3_var_lookup
+    bjerknes_feedback_analysis, calculate_nino_index, is_notebook, ece3_var_lookup, relative_nino34
 # from notebook_utils.plotting import plot_grid_shared_axes
 
 all_ocean_t_vars = ['tos', 'siconc', 'thetao', 'sithick', 'zos', 'mlotst', 'thetao']
@@ -428,6 +428,7 @@ if ocean_drift_var in ece3_ds.data_vars:
 # %%
 en34_da_ece3 = calculate_nino_index(ece3_ds['sea_surface_temperature'], nino_region=3.4)
 en34_da_ece3_seasonal = calculate_nino_index(ece3_ds['sea_surface_temperature'], remove_seasonal_cycle=False, nino_region=3.4)
+en34_da_ece3_relative = relative_nino34(ece3_ds['sea_surface_temperature'])
 
 en3_da_ece3 = calculate_nino_index(ece3_ds['sea_surface_temperature'], nino_region=3)
 
@@ -436,27 +437,25 @@ if not debug:
     print(f'Saving Nino data to {OUTPUT_DIR}')
     en34_da_ece3.to_netcdf(os.path.join(OUTPUT_DIR, 'nino3_4_ece3.nc'))
     en34_da_ece3_seasonal.to_netcdf(os.path.join(OUTPUT_DIR, 'nino3_4_ece3_seasonal.nc'))
+    en34_da_ece3_relative.to_netcdf(os.path.join(OUTPUT_DIR, 'nino3_4_ece3_relative.nc'))
 
 # %%
 all_enso_correlation_vars = ['total_precipitation_daily', 'surface_pressure', '10m_u_component_of_wind', 'instantaneous_eastward_turbulent_surface_stress']
 enso_correlation_vars = list(set(all_enso_correlation_vars).intersection(all_renamed_vars))
 
-for var in enso_correlation_vars:
-    x = en34_da_ece3
-    y = ece3_ds[var]
-    ece3_nino_stats_ds = calculate_linear_relationship(x,y)
-    
-    if not debug:
-        print(f'Saving Nino stats data to {OUTPUT_DIR}')
-        ece3_nino_stats_ds.to_netcdf(os.path.join(OUTPUT_DIR, f'ece3_nino3_4_stats_{var}.nc'))
+en34_dict = {'basic': en34_da_ece3,
+            'relative': en34_da_ece3_relative}
 
-    x = en3_da_ece3
-    y = ece3_ds[var]
-    ece3_nino_3_stats_ds = calculate_linear_relationship(x,y)
+for k, da in en34_dict.items():
+    for var in enso_correlation_vars:
+        x = da
+        y = ece3_ds[var]
+        ece3_nino_stats_ds = calculate_linear_relationship(x,y)
+        
+        if not debug:
+            print(f'Saving Nino stats data to {OUTPUT_DIR}')
+            ece3_nino_stats_ds.to_netcdf(os.path.join(OUTPUT_DIR, f'ece3_nino3_4_stats_{var}_{k}.nc'))
 
-    if not debug:
-        print(f'Saving Nino stats data to {OUTPUT_DIR}')
-        ece3_nino_3_stats_ds.to_netcdf(os.path.join(OUTPUT_DIR, f'ece3_nino3_stats_{var}.nc'))
 
 # %%
 # def calculate_en34_spectra(da, fs = 12):

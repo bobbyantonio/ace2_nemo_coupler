@@ -7,24 +7,28 @@
 #       format_version: '1.3'
 #       jupytext_version: 1.17.1
 #   kernelspec:
-#     display_name: Python 3.12.9-01
+#     display_name: ece4
 #     language: python
-#     name: python-3.12.9-01
+#     name: ece4
 # ---
 
 # %%
-import os
+import os, sys
 import numpy as np
 import xarray as xr
 from glob import glob
-
+import xesmf as xe
 import matplotlib.pyplot as plt
+import cartopy.crs as ccrs
+import cartopy.mpl.ticker as cticker
+
+sys.path.append('/perm/ecme4254/repos/ace2_nemo_coupler')
+from notebooks.plotting import plot_map_grid
 
 # %%
-nemo_results_dir = '/home/ecme4254/scratch/run_dir/n3.6_ace2_spinupCMIP6_laplacian_20060101-20110101_m0'
-
-# %%
-ace2_land_mask = xr.load_dataarray("/hpcperm/ecme4254/ml_model_data/ace2/era5_sea_mask_ACE2.nc")
+nemo_results_dir = '/home/ecme4254/hpcperm/model_runs/n3.6_ace2_1951_ace2iceflux_19510101-20210101_m0'
+ace2_grid = xr.load_dataarray("/home/ecme4254/hpcperm/ml_model_data/ace2/grid.nc")
+ace2_sea_mask = xr.load_dataarray("/home/ecme4254/hpcperm/ml_model_data/ace2/era5_sea_mask_ACE2.nc")
 
 
 # %%
@@ -35,42 +39,113 @@ def get_location_of_maxima(da):
     return [(v.name, v.item()) for v in max_loc_da.coords.values()]
 
 
-# %%
-max_loc_da = ds['sossheig'].where(ds['sossheig']==ds['sossheig'].max(), drop=True).squeeze()
-
-# %%
-[(v.name, v.item()) for v in max_loc_da.coords.values()]
-
 # %% [markdown]
 # ## Investigate output files after a crash
 
 # %%
-ds = xr.load_dataset(os.path.join(nemo_results_dir, f'output.abort_0001.nc'))
-
-# %%
-[{dv: ds[dv].attrs['standard_name']} for dv in list(ds.data_vars)]
-
-# %%
-error_variable = 'vozocrtx'
+error_variable = 'sossheig'
 
 for n in range(32):
-    ds = xr.load_dataset(os.path.join(nemo_results_dir, f'output.abort_{n:04d}.nc'))
+    da = xr.load_dataset(os.path.join(nemo_results_dir, f'output.abort_{n:04d}.nc'))[error_variable].isel(time_counter=0)
 
-    # if 'deptht' in ds.dims:
-    #     ds = ds.isel(deptht=0)
-
-    if ds[error_variable].max().item() > 1:
-        print(n, ds[error_variable].max().item())
-        print(get_location_of_maxima(ds[error_variable]))
+    print(n, np.abs(da).max().item())
+    # if np.abs(da).max().item() > 1:
+    #     print(n, da.max().item())
+        # print(get_location_of_maxima(da))
 
 # %%
-ds = xr.load_dataset(os.path.join(nemo_results_dir, 'output.abort_0005.nc')).isel(time_counter=0)
+error_ds = xr.load_dataset(os.path.join(nemo_results_dir, 'output.abort_0025.nc')).isel(time_counter=0)
 
 # %%
-ds[error_variable].plot(x='nav_lon', y='nav_lat')
+error_ds[error_variable].plot(x='nav_lon', y='nav_lat')
 
 # %%
-ds['sinflx'].plot(x='nav_lon', y='nav_lat')
+tmp_regridder = xe.Regridder(error_ds, 
+                         ace2_grid, 
+                         'bilinear',
+                         ignore_degenerate=True, 
+                         reuse_weights=False, 
+                         periodic=True, 
+                         filename=f'nemo_output_abort_weights.nc')
+
+# %%
+error_ds_regridded = tmp_regridder(error_ds)
+
+# %%
+
+da_grid = [[error_ds_regridded[error_variable].sel(longitude=slice(min_lon, max_lon), 
+                                       latitude=slice(min_lat, max_lat))]]
+
+plot_map_grid(da_grid,
+                 cbar_labels=[[error_variable]],
+                 titles_grid=[['']],
+                 vmax_vals=[[None]],
+                 vmin_vals=[[None]],
+                 projection=ccrs.PlateCarree(),
+                 cmaps=['RdBu_r'],
+                 column_groups=[[0]],
+                 width_height_ratio=[8, 6],
+                 shrink_factor=1,
+                 wspace=0.001,
+                 cbar_height_ratio=0.02,
+                 lat_ticks=np.arange(min_lat, max_lat+1, 10),
+                 lon_ticks=np.arange(min_lon, max_lon+1, 10),
+                 cbar_max_width=1.0)
+
+# %%
+fig, axs = plt.subplots(2,1, figsize=(10, 5), subplot_kw={'projection': ccrs.PlateCarree()})
+
+min_lat = 65
+max_lat = 80
+min_lon = 130
+max_lon = 165
+
+
+print(error_ds[error_variable].min().item(), error_ds[error_variable].max().item())
+tmp_da = error_ds_regridded[error_variable].sel(longitude=slice(min_lon, max_lon), 
+                                       latitude=slice(min_lat, max_lat))
+print(tmp_da.min().item(), tmp_da.max().item())
+tmp_da.plot(x='longitude', 
+                                                                   y='latitude', 
+                                                                   ax=axs[0], 
+                                                                   cmap='RdBu_r',
+                                                                   transform=ccrs.PlateCarree())
+ace2_sea_mask.sel(longitude=slice(min_lon, max_lon), 
+                                       latitude=slice(min_lat, max_lat)).plot(x='longitude',y='latitude', ax=axs[1], cmap='gray', transform=ccrs.PlateCarree())                                   
+for ax in axs:
+    lat_ticks=np.arange(min_lat, max_lat+1, 10)
+    lon_ticks=np.arange(min_lon, max_lon+1, 10)
+    ax.set_xticks(lon_ticks, crs=ccrs.PlateCarree())
+    ax.xaxis.set_major_formatter(cticker.LongitudeFormatter())
+    ax.set_xlabel("Longitude")
+    ax.set_yticks(lat_ticks, crs=ccrs.PlateCarree())
+    ax.yaxis.set_major_formatter(cticker.LatitudeFormatter())
+    ax.set_ylabel("Latitude")
+    ax.coastlines()
+
+# %%
+fig, ax = plt.subplots(1,1, figsize=(10, 5), subplot_kw={'projection': ccrs.PlateCarree()})
+
+min_lat = 65
+max_lat = 80
+min_lon = 130
+max_lon = 165
+
+
+print(error_ds[error_variable].min().item(), error_ds[error_variable].max().item())
+tmp_da = error_ds[error_variable]
+tmp_da.plot(ax=ax, x='nav_lon', y='nav_lat', cmap='RdBu_r',
+                                                                   transform=ccrs.PlateCarree())
+                                       
+# lat_ticks=np.arange(min_lat, max_lat+1, 10)
+# lon_ticks=np.arange(min_lon, max_lon+1, 10)
+# ax.set_xticks(lon_ticks, crs=ccrs.PlateCarree())
+# ax.xaxis.set_major_formatter(cticker.LongitudeFormatter())
+# ax.set_xlabel("Longitude")
+# ax.set_yticks(lat_ticks, crs=ccrs.PlateCarree())
+# ax.yaxis.set_major_formatter(cticker.LatitudeFormatter())
+# ax.set_ylabel("Latitude")ß
+# ax.coastlines(alpha=0.5)
 
 # %%
 max_loc = ds['sinflx'].where(ds['sinflx']==ds['sinflx'].max(), drop=True).squeeze()

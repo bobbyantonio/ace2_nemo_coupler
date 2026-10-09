@@ -28,7 +28,7 @@ from itertools import chain
 
 sys.path.append("/home/ecme4254/perm/repos/ace2_nemo_coupler")
 from notebooks.coupling_processing_utils import calculate_linear_relationship, calculate_anomalies, ace2_var_lookup, ece3_var_lookup, \
-convert_dts_to_first_of_month, is_notebook, mean_areas, OLEVEL_VALUES, load_ece3_data, calculate_nino_index
+convert_dts_to_first_of_month, is_notebook, mean_areas, OLEVEL_VALUES, load_ece3_data, calculate_nino_index, bjerknes_feedback_analysis
 
 # %%
 BASE_OUTPUT_DIR = '/home/ecme4254/perm/repos/ace2_nemo_coupler/notebooks/processed_data'
@@ -248,45 +248,16 @@ for var in ['total_precipitation_daily']:
 #     experiment_ds_dict[k]['sea_surface_temperature'] = sst_da_dict[k]
 
 # %%
-# def bjerknes_feedback_analysis(ds):
-    
-#     enso_vars_ds = ds[['sea_surface_temperature', 
-#                        '10m_u_component_of_wind']].sel(longitude=slice(130, 250), latitude=slice(-15,15)).copy()
-    
-#     anomaly_ds = calculate_anomalies(enso_vars_ds).transpose('time', 'latitude', 'longitude')
 
-#     for var in ['sea_surface_temperature']:
-    
-#         anomaly_ds[f'{var}_gradient'] = anomaly_ds[var].sel(longitude=slice(220, 250), 
-#                                                             latitude=slice(-5,5)).mean(['longitude', 'latitude']) - anomaly_ds[var].sel(longitude=slice(130, 160), latitude=slice(-5,5)).mean(['longitude', 'latitude'])
-#         anomaly_ds[f'{var}_gradient'] = anomaly_ds[f'{var}_gradient'] / ( ( 235 - 145) * 111.32 * 1000) # Result is in K/m
-
-#     anomaly_ds['10m_u_component_of_wind_area_avg'] = anomaly_ds['10m_u_component_of_wind'].sel(latitude=slice(-5,5)).mean(['longitude', 'latitude'])
-    
-#     ###########
-#     results_dict = {}
-#     for comparison_vars in [
-#                             ['sea_surface_temperature_gradient', '10m_u_component_of_wind'],
-#                            ]:
-    
-#         cvar1 = comparison_vars[0]
-#         cvar2 = comparison_vars[1]
-    
-#         results_dict[f'{cvar1}__{cvar2}'] = calculate_linear_relationship(anomaly_ds[cvar1], anomaly_ds[cvar2])
-#         results_dict[f'{cvar2}__{cvar1}'] = calculate_linear_relationship(anomaly_ds[cvar2], anomaly_ds[cvar1])
+results_dict, anomaly_ds = bjerknes_feedback_analysis(experiment_ds.copy())
         
-#     return results_dict, anomaly_ds
+if not debug:
+    print(f"Saving zonal gradient and area average variables")   
+    anomaly_ds[[v for v in anomaly_ds  if (v.endswith('gradient') or v.endswith('area_avg'))]].to_netcdf(os.path.join(OUTPUT_DIR, f'zonal_pacific_gradients.nc'))
+
+if not debug:
+    print(f"Saving Bjerknes feedback results ")
+    with open(os.path.join(OUTPUT_DIR, f'bjerknes_correlations.pkl'), 'wb+') as ofh:
+        pickle.dump(results_dict, ofh)
 
 # %%
-# for k, ds in experiment_ds_dict.items():
-#     ds.attrs['experiment_id'] = experiment_id
-#     results_dict, anomaly_ds = bjerknes_feedback_analysis(ds.copy())
-            
-#     if not debug:
-#         print(f"Saving zonal gradient and area average variables for {k} run...")   
-#         anomaly_ds[[v for v in anomaly_ds  if (v.endswith('gradient') or v.endswith('area_avg'))]].to_netcdf(os.path.join(OUTPUT_DIR, f'zonal_pacific_gradients.nc'))
-
-#     if not debug:
-#         print(f"Saving Bjerknes feedback results for {k} run...")
-#         with open(os.path.join(OUTPUT_DIR, f'bjerknes_correlations_{k}.pkl'), 'wb+') as ofh:
-#             pickle.dump(results_dict, ofh)

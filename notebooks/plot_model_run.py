@@ -18,6 +18,7 @@ import string
 import pickle
 import numpy as np
 import xarray as xr
+import xarray_regrid
 from itertools import chain
 from matplotlib import colormaps
 
@@ -35,8 +36,8 @@ mpl.style.use('default')
 
 # %%
 sys.path.append('/perm/ecme4254/repos/ace2_nemo_coupler')
-from notebooks.plotting import plot_maps_shared_colorbar, plot_imshow_shared_axes, plot_map_grid_no_shared_colorbar, plot_map_grid_cbar_by_row, plot_map_grid_cbar_by_column
-from notebooks.coupling_processing_utils import calculate_en34_spectra, is_notebook
+from notebooks.plotting import plot_maps_shared_colorbar, plot_imshow_shared_axes, plot_map_grid_no_shared_colorbar, plot_map_grid_cbar_by_row, plot_map_grid_cbar_by_column, plot_map_grid
+from notebooks.coupling_processing_utils import calculate_en34_spectra, is_notebook, mean_areas, relative_nino34, calculate_en34_spectra
 
 
 PLOT_DIR = '/perm/ecme4254/repos/ace2_nemo_coupler/plots'
@@ -60,6 +61,11 @@ ece_control_dir = os.path.join(BASE_DATA_DIR, 'EC-Earth3P_control-1950')
 ece_hist_dir = os.path.join(BASE_DATA_DIR, 'EC-Earth3P_hist-1950')
 ece_historical_dir = os.path.join(BASE_DATA_DIR, 'EC-Earth3_historical')
 era5_dir =  os.path.join(BASE_DATA_DIR, 'ERA5')
+hadisst_dir =  os.path.join(BASE_DATA_DIR, 'HadISST')
+
+spinup_dir_1 =  os.path.join(BASE_DATA_DIR, 'n3.6_ace2_spinupCMIP6_laplacian_19510101-20210101')
+spinup_dir_2 =  os.path.join(BASE_DATA_DIR, 'n3.6_ace2_spinupCMIP6_laplacian_19510101-21010101')
+
 
 sea_mask = xr.load_dataarray("/home/ecme4254/perm/ece3data/era5/era5_sea_mask_ACE2.nc")
 
@@ -160,29 +166,35 @@ mpl.style.use('default')
 
 # with open(os.path.join(ace2_nemo_control_dir, f'lagged_correlations_max10.pkl'), 'rb') as ifh:
 #     ace2_nemo_control_lagged_corr = pickle.load(ifh)
-for (lag_var1, lag_var2) in [ ('mean_surface_heat_flux', 'sea_surface_temperature'),
+# ('mean_surface_heat_flux', 'sea_surface_temperature'),
+for (lag_var1, lag_var2) in [ 
                               ('10m_u_component_of_wind', '10m_u_component_of_wind') ]:
 
     
-    with open(os.path.join(ace2_nemo_control_dir, f"lagged_correlations_max5_{lag_var1}_{lag_var2}.pkl"), 'rb') as ifh:
+    with open(os.path.join(ace2_nemo_control_dir, f"lagged_correlations_max1_{lag_var1}_{lag_var2}.pkl"), 'rb') as ifh:
         ace2_nemo_control_lagged_corr = pickle.load(ifh)
     
-    with open(os.path.join(ece_control_dir, f"lagged_correlations_max5_{lag_var1}_{lag_var2}.pkl"), 'rb') as ifh:
+    with open(os.path.join(ece_control_dir, f"lagged_correlations_max1_{lag_var1}_{lag_var2}.pkl"), 'rb') as ifh:
         ece_control_lagged_corr = pickle.load(ifh)
+
+    with open(os.path.join(era5_dir, f"lagged_correlations_max1_{lag_var1}_{lag_var2}.pkl"), 'rb') as ifh:
+        era5_lagged_corr = pickle.load(ifh)
     
     lags = list(ace2_nemo_control_lagged_corr.keys())
 
+    lat_range = (-30,30)
     if lag_var1 == lag_var2:
         plot_lags = [1]
-        lat_range = [-30,30]
+        # lat_range = [-30,30]
         width_height_ratio = [8,3]
     else:
         plot_lags= [-1,0,1]
-        lat_range = [-90,90]
+        # lat_range = [-90,90]
         width_height_ratio = [8,5]
     stat= 'corr'
     da_grid = [[ace2_nemo_control_lagged_corr[l][stat].sel(lat=slice(lat_range[0], lat_range[1])),
-                ece_control_lagged_corr[l][stat].sel(lat=slice(lat_range[0], lat_range[1]))] for l in plot_lags]
+                ece_control_lagged_corr[l][stat].sel(lat=slice(lat_range[0], lat_range[1])),
+                era5_lagged_corr[l][stat].sel(lat=slice(lat_range[0], lat_range[1]))] for l in plot_lags]
         
     vmax, vmin = 1,-1
     cbar_label = 'Correlation'
@@ -190,7 +202,7 @@ for (lag_var1, lag_var2) in [ ('mean_surface_heat_flux', 'sea_surface_temperatur
     
     fig, axs = plot_maps_shared_colorbar(da_grid, 
                               cbar_label,
-                              [[f'a) ACE2-NEMO-control lag = {l}', f'b) ECE3P-control lag = {l}'] for l in plot_lags],
+                              [[f'a) ACE2-NEMO-control', f'b) ECE3P-control', f'c) ERA5'] for l in plot_lags],
                               vmax, 
                               vmin,
                               width_height_ratio =width_height_ratio,
@@ -202,8 +214,22 @@ for (lag_var1, lag_var2) in [ ('mean_surface_heat_flux', 'sea_surface_temperatur
                               mask=None)
     for r in range(len(plot_lags)):
         for c in range(len(da_grid[0])):
-    
-            axs[r][c].coastlines()
+
+            ax = axs[r][c]
+            ax.coastlines()
+
+            # ax.set_xlabel('Longitude')
+            # ax.set_ylabel('Latitude')
+            # ax.set_title("")
+            # ax.set_xticks(np.arange(-180,181,60), crs=ccrs.PlateCarree())
+            # lon_formatter = cticker.LongitudeFormatter()
+            # ax.xaxis.set_major_formatter(lon_formatter)
+            # ax.set_xlabel('Longitude')
+            
+            # ax.set_yticks(np.arange(lat_range[0], lat_range[1],min(30, 0.5*(lat_range[1]-lat_range[0]))), crs=ccrs.PlateCarree())
+            # lat_formatter = cticker.LatitudeFormatter()
+            # ax.yaxis.set_major_formatter(lat_formatter)
+            # ax.set_ylabel('Latitude')
     
     plt.savefig(os.path.join(MANUSCRIPT_FIGURE_DIR, f"lagged_{stat}_{lag_var1}_{lag_var2}.pdf"), format='pdf', bbox_inches='tight')
 
@@ -233,6 +259,11 @@ with open(os.path.join(ece_control_dir, f'time_mean_state_dict.pkl'), 'rb') as i
 with open(os.path.join(ace2_forced_ece3_dir, f'time_mean_state_dict.pkl'), 'rb') as ifh:
     ace2_forced_ece3_time_mean_state_dict = pickle.load(ifh)
 
+
+# with open(os.path.join(spinup_dir_1, f'time_mean_state_dict.pkl'), 'rb') as ifh:
+#     spinup_1_time_mean_state_dict = pickle.load(ifh)
+# with open(os.path.join(spinup_dir_2, f'time_mean_state_dict.pkl'), 'rb') as ifh:
+#     spinup_2_time_mean_state_dict = pickle.load(ifh)
 
 # %%
 plot_vars= ['10m_u_component_of_wind']
@@ -293,6 +324,67 @@ plot_map_grid_cbar_by_row(da_grid,
                                 cbar_height_ratio=0.02,
                                 )
 plt.savefig(os.path.join(MANUSCRIPT_FIGURE_DIR, f"control_mean_state.pdf"), format='pdf', bbox_inches='tight')
+
+# %%
+shrink_factor= 0.6
+wspace=0.001
+cbar_height_ratio=0.02
+width_height_ratio = [8,6]
+projection=ccrs.Robinson(central_longitude=180)
+lat_ticks=None
+lon_ticks=None
+
+plot_vars= ['total_precipitation_daily', 
+            '2m_temperature',
+           'sea_surface_temperature', 
+            'sea_surface_height']
+da_grid = [ [ace2_nemo_control_time_mean_state_dict['All'][varname].transpose('latitude', 'longitude'),  
+             ece_control_time_mean_state_dict['All'][varname].transpose('latitude', 'longitude'),
+            ace2_nemo_control_time_mean_state_dict['All'][varname].transpose('latitude', 'longitude')-ece_control_time_mean_state_dict['All'][varname].transpose('latitude', 'longitude')] for varname in plot_vars]
+num_cols = 2
+num_rows = 4
+cbar_labels= [f"{name_lookup[varname]['name']} mean [{name_lookup[varname]['units']}]" for varname in plot_vars]
+cbar_labels = [[cbl, cbl, None] for cbl in cbar_labels]
+
+cbar_labels[0][2] = 'Difference [mm/day]'
+cbar_labels[1][2] = 'Difference [K]'
+cbar_labels[2][2] = 'Difference [K]'
+cbar_labels[3][2] = 'Difference [m]'
+
+titles_grid = [['a) ACE2-NEMO-control', 'b) ECE3P-control','c) ACE2-NEMO-control - ECE3P-control'], 
+               ['d) ACE2-NEMO-control', 'e) ECE3P-control','f) ACE2-NEMO-control - ECE3P-control'],
+              ['g) ACE2-NEMO-control', 'h) ECE3P-control','i) ACE2-NEMO-control - ECE3P-control'],
+              ['j) ACE2-NEMO-control', 'k) ECE3P-control', 'l) ACE2-NEMO-control - ECE3P-control']]
+vmax_vals = [[mean_state_range_dict.get(varname, {}).get('vmax', None), None]  for varname in plot_vars]
+vmin_vals = [[mean_state_range_dict.get(varname, {}).get('vmin', None), None] for varname in plot_vars]
+cmaps = [[mean_state_range_dict.get(varname, {}).get('cmap', 'RdBu_r'), 'RdBu_r'] for varname in plot_vars]
+
+vmax_vals[0][1] = 5
+vmin_vals[0][1] = -5
+vmax_vals[1][1] = 8
+vmin_vals[1][1] = -8
+vmax_vals[2][1] = 6
+vmin_vals[2][1] = -6
+vmax_vals[3][1] = 0.5
+vmin_vals[3][1] = -0.5
+
+
+
+
+plot_map_grid(da_grid,
+                                cbar_labels,
+                                titles_grid ,
+                                vmax_vals,
+                                vmin_vals,
+                                  projection=ccrs.Robinson(central_longitude=180),
+                                  cmaps=cmaps,
+                                  column_groups=[[0,1], [2]],
+                                width_height_ratio = [8,6],
+                                shrink_factor= 0.6,
+                                wspace=0.001,
+                                cbar_height_ratio=0.02,
+)
+plt.savefig(os.path.join(MANUSCRIPT_FIGURE_DIR, f"control_mean_state_withdiffs.pdf"), format='pdf', bbox_inches='tight')
 
 # %%
 plot_vars= [
@@ -387,6 +479,119 @@ cbar = plt.colorbar(im, cax=cbar_ax, label='Sea ice fraction [0-1]', orientation
 cbar.ax.tick_params(labelsize=10)
 plt.savefig(os.path.join(MANUSCRIPT_FIGURE_DIR, "sea_ice_fraction.pdf"), format='pdf', bbox_inches='tight')
 
+# %%
+num_rows = 2
+num_cols = 4
+width_height_ratio = [6,6]
+shrink_factor = 0.7
+wspace=0.05
+sea_ice_mask = ~np.isnan(ece_control_time_mean_state_dict['All']['sea_ice_fraction'])
+
+land_50m = cfeature.NaturalEarthFeature('physical', 'land', '50m',
+                                        edgecolor=cfeature.COLORS['land'],
+                                        facecolor=cfeature.COLORS['land'])
+
+satellite_height = 2000000
+
+fig = plt.figure(constrained_layout=True, figsize=(shrink_factor*width_height_ratio[0]*num_cols, shrink_factor*width_height_ratio[1]*num_rows))
+
+gs = gridspec.GridSpec(num_rows + 1, num_cols, figure=fig, 
+                    width_ratios=[1]* num_cols,
+                    height_ratios=[1] * num_rows + [0.1],
+                       wspace=wspace)
+
+projections = [ccrs.NearsidePerspective(central_longitude=-140.0, 
+                                                         central_latitude=90,
+                                                         false_easting=0,
+                                                         satellite_height=satellite_height),
+              ccrs.NearsidePerspective(central_longitude=-140.0, 
+                                                         central_latitude=-90,
+                                                         false_easting=0,
+                                                         satellite_height=satellite_height)]
+
+plot_axs = [[fig.add_subplot(gs[m, 0:2], projection = projections[m]), fig.add_subplot(gs[m, 1:3], projection = projections[m])]
+            for m in range(num_rows)]
+
+
+da_list = [xr.where(sea_ice_mask, ace2_nemo_control_time_mean_state_dict['All']['sea_ice_volume'], np.nan),
+              ece_control_time_mean_state_dict['All']['sea_ice_volume']]
+
+titles_grid = [['a) ACE2-NEMO-control', 'b) ECE3P-control'], ['c) ACE2-NEMO-control', 'd) ECE3P-control']]
+
+for row in range(num_rows):
+    for col in range(2):
+
+        im = da_list[col].plot(ax=plot_axs[row][col], 
+                          vmax=None, vmin=None, 
+                          cmap='viridis', 
+                          add_colorbar=False, rasterized=True,
+                          transform=ccrs.PlateCarree())
+        plot_axs[row][col].coastlines()
+        plot_axs[row][col].add_feature(land_50m)
+
+        plot_axs[row][col].set_title(titles_grid[row][col])
+
+cbar_ax = fig.add_subplot(gs[row+1, 1:2])
+cbar = plt.colorbar(im, cax=cbar_ax, label='Sea ice volume [$m^3$]', orientation='horizontal')
+cbar.ax.tick_params(labelsize=10)
+plt.savefig(os.path.join(MANUSCRIPT_FIGURE_DIR, "sea_ice_volume.pdf"), format='pdf', bbox_inches='tight')
+
+# %%
+num_rows = 2
+num_cols = 4
+width_height_ratio = [6,6]
+shrink_factor = 0.7
+wspace=0.05
+sea_ice_mask = ~np.isnan(ece_control_time_mean_state_dict['All']['sea_ice_fraction'])
+
+land_50m = cfeature.NaturalEarthFeature('physical', 'land', '50m',
+                                        edgecolor=cfeature.COLORS['land'],
+                                        facecolor=cfeature.COLORS['land'])
+
+satellite_height = 2000000
+
+fig = plt.figure(constrained_layout=True, figsize=(shrink_factor*width_height_ratio[0]*num_cols, shrink_factor*width_height_ratio[1]*num_rows))
+
+gs = gridspec.GridSpec(num_rows + 1, num_cols, figure=fig, 
+                    width_ratios=[1]* num_cols,
+                    height_ratios=[1] * num_rows + [0.1],
+                       wspace=wspace)
+
+projections = [ccrs.NearsidePerspective(central_longitude=-140.0, 
+                                                         central_latitude=90,
+                                                         false_easting=0,
+                                                         satellite_height=satellite_height),
+              ccrs.NearsidePerspective(central_longitude=-140.0, 
+                                                         central_latitude=-90,
+                                                         false_easting=0,
+                                                         satellite_height=satellite_height)]
+
+plot_axs = [[fig.add_subplot(gs[m, 0:2], projection = projections[m]), fig.add_subplot(gs[m, 1:3], projection = projections[m])]
+            for m in range(num_rows)]
+
+
+da_list = [xr.where(sea_ice_mask, spinup_1_time_mean_state_dict['All']['sea_ice_fraction'], np.nan),
+             xr.where(sea_ice_mask, spinup_2_time_mean_state_dict['All']['sea_ice_fraction'], np.nan)]
+
+titles_grid = [['a) spinup 1', 'b) spinup 2'], ['c) spinup 1', 'd) spinup 2']]
+
+for row in range(num_rows):
+    for col in range(2):
+
+        im = da_list[col].plot(ax=plot_axs[row][col], 
+                          vmax=1, vmin=0, 
+                          cmap='viridis', 
+                          add_colorbar=False, rasterized=True,
+                          transform=ccrs.PlateCarree())
+        plot_axs[row][col].coastlines()
+        plot_axs[row][col].add_feature(land_50m)
+
+        plot_axs[row][col].set_title(titles_grid[row][col])
+
+cbar_ax = fig.add_subplot(gs[row+1, 1:2])
+cbar = plt.colorbar(im, cax=cbar_ax, label='Sea ice fraction [0-1]', orientation='horizontal')
+cbar.ax.tick_params(labelsize=10)
+
 
 # %% [markdown]
 # #### Climate mean state diffs, for ACE2-NEMO-control and ACE2-forced ECE3P
@@ -464,6 +669,162 @@ fig, axs = plot_map_grid_no_shared_colorbar(data_dict,
                                 
 
 plt.savefig(os.path.join(MANUSCRIPT_FIGURE_DIR, f"mean_state_diffs.pdf"), format='pdf', bbox_inches='tight')
+
+# %% [markdown]
+# ### Difference in sea masks
+
+# %%
+mask_points_da = xr.open_dataarray('/perm/ecme4254/repos/ace2_nemo_coupler/notebooks/processed_data/n3.6_ace2_1951_control_compressed_19510101-20210101/masked_ice_flux_points.nc')
+
+# %%
+fig, ax = plt.subplots(1,1, subplot_kw={'projection': ccrs.PlateCarree()})
+
+mask_points = mask_points_da.mean("time")
+
+mask_points = xr.where(mask_points ==0, np.nan, mask_points)
+im = mask_points.transpose('latitude', 'longitude').plot(ax=ax, 
+                                                                      transform=ccrs.PlateCarree(),
+                                                                      cmap='viridis', add_colorbar=False)
+ax.coastlines(alpha=0.2)
+ax.set_title("Masked coastal ice points")
+
+ax.set_xlabel('Longitude')
+ax.set_ylabel('Latitude')
+ax.set_title("")
+ax.set_xticks(np.arange(-180,181,60), crs=ccrs.PlateCarree())
+lon_formatter = cticker.LongitudeFormatter()
+ax.xaxis.set_major_formatter(lon_formatter)
+ax.set_xlabel('Longitude')
+
+ax.set_yticks(np.arange(-90,91,30), crs=ccrs.PlateCarree())
+lat_formatter = cticker.LatitudeFormatter()
+ax.yaxis.set_major_formatter(lat_formatter)
+ax.set_ylabel('Latitude')
+
+plt.colorbar(im, ax=ax, orientation='horizontal', label='Fraction of points masked')
+plt.savefig(os.path.join(MANUSCRIPT_FIGURE_DIR, f"masked_fraction.pdf"), format='pdf', bbox_inches='tight')
+
+# %%
+# Calculate fractionof affected cells
+weights = np.cos(np.deg2rad(mask_points_da.latitude))
+weights = weights / weights.sum().item()
+
+mask_points = xr.where(sea_mask, mask_points_da.mean("time")> 0.1, np.nan)
+print(mask_points.weighted(weights).sum() / sea_mask.weighted(weights).sum())
+
+# %%
+nemo_sea_mask = ~np.isnan(ace2_nemo_control_time_mean_state_dict['All']['sea_surface_temperature'])
+nemo_land_mask = np.isnan(ace2_nemo_control_time_mean_state_dict['All']['sea_surface_temperature'])
+
+# %%
+era5_lsm = xr.load_dataarray("/home/ecme4254/hpcperm/era5/static/land_sea_mask/era5_land_sea_mask.nc").isel(time=0)
+ace2_grid = xr.load_dataset("/home/ecme4254/hpcperm/ml_model_data/ace2/grid.nc")
+regridded_lsm = era5_lsm.regrid.linear(ace2_grid)
+
+ace2_lsm = xr.load_dataset("/home/ecme4254/hpcperm/ml_model_data/ace2/forcing_data/forcing_1951.nc")['land_fraction']
+
+# %%
+# fig, ax = plt.subplots(1,1, subplot_kw={'projection': ccrs.PlateCarree()})
+
+sea_mask_diff = ((ace2_lsm >0.95).astype(np.int8) - nemo_land_mask.astype(np.int8))
+print(f"Proportion = {sea_mask_diff.sum().item()}")
+# im = sea_mask_diff.plot(ax=ax, 
+#                         transform=ccrs.PlateCarree(),
+#                        add_colorbar=False,rasterized=True,
+#                        x='longitude', y='latitude')
+fig, ax = plt.subplots(1,1, figsize=(8,5), subplot_kw={'projection': ccrs.PlateCarree()})
+
+sea_mask_diff = xr.where(np.abs(sea_mask_diff)< 0.0001, np.nan, sea_mask_diff)
+sea_mask_diff = (sea_mask_diff).sel(latitude=slice(-90,90))
+im = sea_mask_diff.plot(ax=ax,
+             transform=ccrs.PlateCarree(),
+             add_colorbar=False, 
+             rasterized=True, x='longitude', y='latitude', cmap='Reds',)
+
+ax.coastlines(alpha=0.1)
+
+ax.set_xlabel('Longitude')
+ax.set_ylabel('Latitude')
+ax.set_title("")
+ax.set_xticks(np.arange(-180,181,60), crs=ccrs.PlateCarree())
+lon_formatter = cticker.LongitudeFormatter()
+ax.xaxis.set_major_formatter(lon_formatter)
+ax.set_xlabel('Longitude')
+
+ax.set_yticks(np.arange(-90,91,30), crs=ccrs.PlateCarree())
+lat_formatter = cticker.LatitudeFormatter()
+ax.yaxis.set_major_formatter(lat_formatter)
+ax.set_ylabel('Latitude')
+ax.set_title("(ACE2 LSM > 0.5) - isnull(NEMO SST)")
+
+plt.savefig(os.path.join(MANUSCRIPT_FIGURE_DIR, f"sea_mask_diff.pdf"), format='pdf', bbox_inches='tight')
+
+# %%
+# Pattern and magnitude of SSH difference between models with and without freshwater conservation
+
+# %%
+# Difference in polar heat budgets with and without flux masking
+with open(os.path.join(ace2_nemo_control_dir, f'time_mean_state_dict.pkl'), 'rb') as ifh:
+    ace2_nemo_control_time_mean_state_dict = pickle.load(ifh)
+with open(os.path.join(ace2_nemo_nofwb_dir, f'time_mean_state_dict.pkl'), 'rb') as ifh:
+    ace2_nemo_nofwb_time_mean_state_dict = pickle.load(ifh)
+with open(os.path.join(ace2_nemo_noIceFluxMask_dir, f'time_mean_state_dict.pkl'), 'rb') as ifh:
+    ace2_nemo_noIceFluxMask_time_mean_state_dict = pickle.load(ifh)
+
+# %%
+ssh_diff = ace2_nemo_control_time_mean_state_dict['1st year']['sea_surface_height'] - ace2_nemo_nofwb_time_mean_state_dict['1st year']['sea_surface_height']
+
+fig, ax = plt.subplots(1,1, figsize=(7,5), subplot_kw={'projection': ccrs.Robinson(central_longitude=180)})
+
+im = ssh_diff.plot(ax=ax,
+             transform=ccrs.PlateCarree(),
+             add_colorbar=False, 
+             rasterized=True, x='longitude', y='latitude', cmap='Reds',)
+
+ax.coastlines(alpha=0.8)
+
+# ax.set_xlabel('Longitude')
+# ax.set_ylabel('Latitude')
+# ax.set_title("")
+# ax.set_xticks(np.arange(-180,181,60), crs=ccrs.PlateCarree())
+# lon_formatter = cticker.LongitudeFormatter()
+# ax.xaxis.set_major_formatter(lon_formatter)
+# ax.set_xlabel('Longitude')
+
+# ax.set_yticks(np.arange(-90,91,30), crs=ccrs.PlateCarree())
+# lat_formatter = cticker.LatitudeFormatter()
+# ax.yaxis.set_major_formatter(lat_formatter)
+# ax.set_ylabel('Latitude')
+
+plt.colorbar(im, ax=ax, orientation='horizontal', fraction=0.15, shrink=0.5, pad=0.05,
+             label='SSH difference (m)')
+
+ax.set_title("SSH difference from freshwater correction")
+plt.savefig(os.path.join(MANUSCRIPT_FIGURE_DIR, f"freshwater_correction_ssh_diff.pdf"), format='pdf', bbox_inches='tight')
+
+# %%
+
+# %%
+
+for region in ['Global']:
+    for var in ['solar_flux_over_ice', 'total_non_solar_flux_ice']:
+
+        area_dict = mean_areas[region]
+        
+        
+        nonmasked = ace2_nemo_control_time_mean_state_dict['All'][var].sel(latitude=slice(area_dict['min_lat'], area_dict['max_lat']))
+        masked = ace2_nemo_control_time_mean_state_dict['All'][f'coastal_masked_{var}'].sel(latitude=slice(area_dict['min_lat'], area_dict['max_lat']))
+
+        fig, axs = plt.subplots(2,1, subplot_kw={'projection': ccrs.PlateCarree()})
+
+        nonmasked.plot(ax=axs[0])
+        masked.plot(ax=axs[1])
+        
+#         print('***********')
+#         print(f'{region} {var} without masking', nonmasked)
+#         print(f'{region} {var} with masking', masked)
+#         print(f'{region} {var} percent diff: {100*(masked-nonmasked)/nonmasked:02f}')
+        
 
 # %% [markdown]
 # # Historical run - evidence for SST behaviour
@@ -595,9 +956,9 @@ data_grid = [[xr.where(ice_mask, diff_da, np.nan).transpose('latitude', 'longitu
              xr.where(ice_mask_ece, ece_control_time_mean_state_dict[time_range]['mean_surface_sensible_heat_flux'], np.nan),
              xr.where(ice_mask, ace2_forced_ece3_time_mean_dict[time_range]['mean_surface_sensible_heat_flux'], np.nan).transpose('latitude', 'longitude')]]
 
-title_grid = [['a) T2m - Sea ice temperature', 'b) Sensible heat flux (ACE2-NEMO)', 
-               'c) Sensible heat flux (ACE2)', 'd) Sensible heat flux (ECE3P-control)',
-              'e) Sensible heat flux (ACE2-ECE3-forced)']]
+title_grid = [['a) T2m - Sea ice temperature\n', 'b) Sensible heat flux\n(ACE2-NEMO)', 
+               'c) Sensible heat flux\n(ACE2)', 'd) Sensible heat flux\n(ECE3P-control)',
+              'e) Sensible heat flux\n(ACE2-ECE3-prescribed)']]
 
 name_lookup['mean_surface_sensible_heat_flux_raw'] = {'name': 'Sensible heat flux (ACE2)', 'units': '$W/m^2$'}
 name_lookup['mean_surface_sensible_heat_flux_ece'] = {'name': 'Sensible heat flux (ECE)', 'units': '$W/m^2$'}
@@ -629,7 +990,7 @@ fig, axs = plot_map_grid_no_shared_colorbar(data_grid,
                                     cbar_frac = 1.0,
                                     cbar_shrink=2.0,
                                     width_height_ratio = [5,5],
-                                      shrink_factor=0.7, 
+                                      shrink_factor=0.6, 
                                       wspace=0.001,
                                       cbar_height_ratio=0.05)
 
@@ -637,66 +998,6 @@ plt.savefig(os.path.join(MANUSCRIPT_FIGURE_DIR, f"shf_comparison.pdf"), format='
 
 # %% [markdown]
 # ## Line plots
-
-# %%
-with open(os.path.join(ace2_fluxes_dir, f'mean_dict.pkl'), 'rb') as ifh:
-    acefluxes_mean_dict = pickle.load(ifh)
-with open(os.path.join(ece_control_dir, f'mean_dict.pkl'), 'rb') as ifh:
-    ece_control_mean_dict = pickle.load(ifh)
-with open(os.path.join(ace2_nemo_nofwb_dir, f'mean_dict.pkl'), 'rb') as ifh:
-    ace2_nemo_nofwb_dict = pickle.load(ifh)
-with open(os.path.join(ace2_nemo_control_dir, f'mean_dict.pkl'), 'rb') as ifh:
-    ace2_nemo_control_dict = pickle.load(ifh)
-with open(os.path.join(ace2_nemo_noIceFluxMask_dir, f'mean_dict.pkl'), 'rb') as ifh:
-    ace2_nemo_noicefluxmask_dict = pickle.load(ifh)
-    
-years = sorted(set(acefluxes_mean_dict['Global']['mean']['time.year'].values))
-
-
-# %%
-fig, axs = plt.subplots(1,2, figsize=(5*2,4))
-fig.tight_layout(pad=5)
-
-time_vals = sorted([pd.Timestamp(dt) for dt in ace2_nemo_nofwb_dict['Global']['mean']['time'].values])
-
-handles = []
-labels = []
-
-for n, var in enumerate(['sea_ice_volume', 'sea_surface_height']):
-    
-    if var == 'sea_ice_volume':
-        agg_type = 'UnweightedSum'
-    else:
-        agg_type = 'mean'
-
-    data_dict = {'ACE2-NEMO-control': ace2_nemo_control_dict['Global'][agg_type][var].sel(time=time_vals[:-1], member=0), 
-             'ACE2-NEMO-control (ACE2 Ice Fluxes)': acefluxes_mean_dict['Global'][agg_type][var].sel(time=time_vals[:-1], member=0), 
-             'ECE3P-control': ece_control_mean_dict['Global'][agg_type][var].sel(time=time_vals[:-1]),
-             'ACE2-NEMO (no freshwater conservation)': ace2_nemo_nofwb_dict['Global'][agg_type][var].sel(time=time_vals[:-1]),
-             'ACE2-NEMO (no ice flux mask)': ace2_nemo_noicefluxmask_dict['Global'][agg_type][var]}
-
-    for k,v in data_dict.items():
-        h = v.plot(ax=axs[n])
-
-        if n ==0:
-            handles.append(h[0])
-            labels.append(k)
-
-
-
-    axs[n].set_ylabel(f"{name_lookup[var]['name']} [{name_lookup[var]['units']}]")
-    axs[n].set_xlabel('Time')
-    axs[n].set_title(f'({string.ascii_lowercase[n]})')
-    # axs.set_ylim([290, 296])
-fig.subplots_adjust(bottom=0.3, wspace=0.33)
-
-axs[1].legend(handles = handles , labels=labels,loc='upper center', 
-             bbox_to_anchor=(-0.2, -0.2),fancybox=False, shadow=False, ncol=3)
-
-plt.savefig(os.path.join(MANUSCRIPT_FIGURE_DIR, f"ace2fluxes_drift.pdf"), format='pdf', bbox_inches='tight')
-
-# %%
-## Compare SST for skin temperature, ace fluxes only, and our control run
 
 # %%
 with open(os.path.join(ace2_nemo_hist_dir, f'mean_dict.pkl'), 'rb') as ifh:
@@ -722,6 +1023,70 @@ with open(os.path.join(ece_control_dir, f'mean_dict.pkl'), 'rb') as ifh:
 
 with open(os.path.join(era5_dir, f'mean_dict.pkl'), 'rb') as ifh:
     era5_mean_dict = pickle.load(ifh)
+
+with open(os.path.join(ace2_fluxes_dir, f'mean_dict.pkl'), 'rb') as ifh:
+    acefluxes_mean_dict = pickle.load(ifh)
+
+with open(os.path.join(ace2_nemo_nofwb_dir, f'mean_dict.pkl'), 'rb') as ifh:
+    ace2_nemo_nofwb_dict = pickle.load(ifh)
+    
+    
+with open(os.path.join(ace2_nemo_noIceFluxMask_dir, f'mean_dict.pkl'), 'rb') as ifh:
+    ace2_nemo_noicefluxmask_dict = pickle.load(ifh)
+
+with open(os.path.join(spinup_dir_1, f'mean_dict.pkl'), 'rb') as ifh:
+    spinup1_dict = pickle.load(ifh)
+    
+with open(os.path.join(spinup_dir_2, f'mean_dict.pkl'), 'rb') as ifh:
+    spinup2_dict = pickle.load(ifh)
+    
+years = sorted(set(acefluxes_mean_dict['Global']['mean']['time.year'].values))
+
+
+# %%
+fig, axs = plt.subplots(1,2, figsize=(5*2,4))
+fig.tight_layout(pad=5)
+
+time_vals = sorted([pd.Timestamp(dt) for dt in ace2_nemo_nofwb_dict['Global']['mean']['time'].values])
+
+handles = []
+labels = []
+
+for n, var in enumerate(['sea_ice_volume', 'sea_surface_height']):
+    
+    if var == 'sea_ice_volume':
+        agg_type = 'UnweightedSum'
+    else:
+        agg_type = 'mean'
+
+    data_dict = {'ACE2-NEMO-control': ace2_nemo_control_mean_dict['Global'][agg_type][var].sel(time=time_vals[:-1], member=0), 
+             'ACE2-IceFlux': acefluxes_mean_dict['Global'][agg_type][var].sel(time=time_vals[:-1], member=0), 
+             'ECE3P-control': ece_control_mean_dict['Global'][agg_type][var].sel(time=time_vals[:-1]),
+             'FWB-Off': ace2_nemo_nofwb_dict['Global'][agg_type][var].sel(time=time_vals[:-1]),
+             'IceFluxMask-Off': ace2_nemo_noicefluxmask_dict['Global'][agg_type][var]}
+
+    for k,v in data_dict.items():
+        h = v.plot(ax=axs[n])
+
+        if n ==0:
+            handles.append(h[0])
+            labels.append(k)
+
+
+
+    axs[n].set_ylabel(f"{name_lookup[var]['name']} [{name_lookup[var]['units']}]")
+    axs[n].set_xlabel('Time')
+    axs[n].set_title(f'({string.ascii_lowercase[n]})')
+    # axs.set_ylim([290, 296])
+fig.subplots_adjust(bottom=0.3, wspace=0.33)
+
+axs[1].legend(handles = handles , labels=labels,loc='upper center', 
+             bbox_to_anchor=(-0.2, -0.2),fancybox=False, shadow=False, ncol=3)
+
+plt.savefig(os.path.join(MANUSCRIPT_FIGURE_DIR, f"ace2fluxes_drift.pdf"), format='pdf', bbox_inches='tight')
+
+# %%
+## Compare SST for skin temperature, ace fluxes only, and our control run
 
 # %%
 mpl.style.use('default')
@@ -794,6 +1159,110 @@ axs[-1,-1].legend(handles = handles , labels=labels,loc='upper center',
 
     # if not debug:
 plt.savefig(os.path.join(MANUSCRIPT_FIGURE_DIR, f"global_drift.pdf"), format='pdf', bbox_inches='tight')
+
+# %%
+mpl.style.use('default')
+
+vars_to_plot = [
+                'sea_surface_temperature',  'sea_ice_volume',
+'sea_surface_height', 'total_heat_flux']
+area_name = 'Global'
+nrows = int(np.ceil(len(vars_to_plot)/2))
+ncols=2
+fig, axs = plt.subplots(nrows, 2, figsize=(2*6, 4*nrows))
+fig.tight_layout(pad=5)
+handles = []
+labels = []
+
+time_vals = spinup_1_dict[area_name]['mean']['time']
+for n, var in enumerate(vars_to_plot):
+    if var == 'sea_ice_volume':
+        aggregation='UnweightedSum'
+        units_scale_base10=1e13
+    else:
+        aggregation='mean'
+        units_scale_base10=1
+        
+
+    row = int(n/ncols)
+    col = n%ncols
+    for m in spinup_1_dict[area_name][aggregation]['member'].values:
+
+        label = f'Spinup 1951-2021 m{m}'
+        
+        ace2_nemo_time_series = spinup_1_dict[area_name][aggregation][var].sel(member=m)
+        
+        ace2_nemo_time_series = ace2_nemo_time_series
+        
+        h = (ace2_nemo_time_series/units_scale_base10 ).plot(ax=axs[row,col], label=label)
+
+        if n ==0:
+            handles.append(h[0])
+            labels.append(label)
+
+        label = f'Spinup 1951-2101 m{m}'
+        
+        ace2_nemo_time_series = spinup_2_dict[area_name][aggregation][var].sel(member=m)
+        
+        ace2_nemo_time_series = ace2_nemo_time_series
+        
+        h = (ace2_nemo_time_series/units_scale_base10 ).plot(ax=axs[row,col], label=label)
+
+        if n ==0:
+            handles.append(h[0])
+            labels.append(label)
+
+
+    # except Exception as e:
+    #     pass
+
+    units_scale_log10 = int(np.log10(units_scale_base10))
+    axs[row,col].set_ylabel(f"{name_lookup[var]['abbrev']} [" + ('$10^{'+ str(units_scale_log10) + '}$' if units_scale_log10 != 0 else '') + f"{name_lookup[var]['units']}]")
+    axs[row,col].set_title(f"({string.ascii_lowercase[n]}) {name_lookup[var]['name']}")
+
+    new_tick_labels = [item.get_text() if item.get_text() != 'Jul' else "" for item in axs[row,col].get_xticklabels()]
+    axs[row,col].set_xticklabels(new_tick_labels)
+    axs[row,col].set_xlabel('Time')
+
+fig.subplots_adjust(bottom=0.3, wspace=0.33)
+axs[-1,-1].legend(handles = handles , labels=labels,loc='upper center', 
+             bbox_to_anchor=(-0.3, -0.2),fancybox=False, shadow=False, ncol=4)
+
+    # if not debug:
+
+
+# %% [markdown]
+# ## Calculate differences in polar heat budgets with and without coastal ice flux masking
+
+# %%
+ece_control_mean_dict.keys()
+
+
+# %%
+
+# %%
+
+
+for region in ['Northern Hemisphere', 'Southern Hemisphere', 'Global']:
+    ece_control_mean_dict[region]['mean']['solar_flux_over_ice'] = ece_control_mean_dict[region]['mean']['mean_surface_net_short_wave_radiation_flux_ice'].copy()
+    ece_control_mean_dict[region]['mean']['total_non_solar_flux_ice'] = ece_control_mean_dict[region]['mean']['non_solar_heat_flux_ice'].copy()
+
+    for var in ['solar_flux_over_ice', 'total_non_solar_flux_ice']:
+
+        ece = ece_control_mean_dict[region]['mean'][var].mean().item()
+        masked = ace2_nemo_control_mean_dict[region]['mean'][f'coastal_masked_{var}'].sel(member=0).mean().item()
+
+        
+        nonmasked = ace2_nemo_control_mean_dict[region]['mean'][f'{var}'].sel(member=0).mean().item()
+        ace2iceflux=acefluxes_mean_dict[region]['mean'][f'{var}'].sel(member=0).mean().item()
+        print('***********')
+        print(f'{region} {var} percent diff to ece: {100*(masked-ece)/ece:02f}')
+        print(f'{region} {var} percent diff masked/unmasked: {100*(masked-nonmasked)/nonmasked:02f}')
+        print(f'{region} {var} percent diff masked/ace2icefluxes: {100*(masked-ace2iceflux)/ace2iceflux:02f}')
+
+        ace2_nemo_control_mean_dict[region]['mean'][f'{var}'].sel(member=0).plot()
+
+
 
 # %%
 # Sea ice volume by hemisphere
@@ -1609,9 +2078,6 @@ def get_violin_colour(violin):
 
 
 # %%
-quartile1, medians, quartile3 = np.percentile(d, [25, 50, 75])
-
-# %%
 # Interannual variability in the seasonal cycle
 import matplotlib.patches as mpatches
 
@@ -1644,9 +2110,9 @@ for row, area in enumerate(area_list):
         
         data = [yearly_data, yearly_ece_data]
         labels = ['ACE2-NEMO-control', 'ECE3P-control']
-        if var in ['mean_surface_sensible_heat_flux_oce', 'mean_surface_latent_heat_flux_oce']:
-            data.append(yearly_forced_data)
-            labels.append('ACE2-ECE3P-forced')
+        # if var in ['mean_surface_sensible_heat_flux_oce', 'mean_surface_latent_heat_flux_oce']:
+        #     data.append(yearly_forced_data)
+        #     labels.append('ACE2-ECE3P-forced')
         # bplot = axs[row,col].boxplot([yearly_data, yearly_ece_data],
         #                      whis=(5,95), 
         #                      showfliers=False, bootstrap=50, 
@@ -1752,10 +2218,29 @@ plt.savefig(os.path.join(MANUSCRIPT_FIGURE_DIR, 'seasonal_cycle_ice.pdf'), forma
 # Niño 3.4: Average SST anomalies over (5N-5S, 170W-120W)
 
 # %%
-en34_ace2nemo_ctl_da = xr.concat([xr.load_dataarray(os.path.join(ace2_nemo_control_dir, f'nino3_4_m{m}.nc')).expand_dims({'member': [m]}) for m in range(3)], dim='member')
-en34_ace2nemo_hist_da = xr.concat([xr.load_dataarray(os.path.join(ace2_nemo_hist_dir, f'nino3_4_m{m}.nc')).expand_dims({'member': [m]}) for m in range(3)], dim='member')
+hadisst_data = xr.load_dataset("/home/ecme4254/hpcperm/hadisst/HadISST_sst.nc")['sst']
+hadisst_data = hadisst_data.assign_coords(
+    time=xr.date_range(
+        start=f"{int(hadisst_data.time.dt.year[0]):04d}-{int(hadisst_data.time.dt.month[0]):02d}-01",
+        periods=hadisst_data.sizes["time"],
+        freq="MS",
+        calendar=hadisst_data.time.dt.calendar,
+        use_cftime=None,
+    )
+)
+hadisst_data = hadisst_data.sel(time=pd.date_range('19510101', '20201231', freq='MS'))
+# en34_hadisst = relative_nino34(hadisst_data)
+
+# %%
+en34_ace2nemo_ctl_da = xr.concat([xr.load_dataarray(os.path.join(ace2_nemo_control_dir, f'nino3_4_m{m}.nc')).drop_vars("member", errors="ignore")  # remove existing variable if present
+        .assign_coords(member=m) for m in range(3)], dim='member')
+en34_ace2nemo_hist_da = xr.concat([xr.load_dataarray(os.path.join(ace2_nemo_hist_dir, f'nino3_4_m{m}.nc')).drop_vars("member", errors="ignore")  # remove existing variable if present
+        .assign_coords(member=m) for m in range(3)], dim='member')
 en34_da_ece_control = xr.load_dataarray(os.path.join(ece_control_dir, 'nino3_4_ece3.nc'))
 en34_era5 = xr.load_dataarray(os.path.join(era5_dir, 'nino3_4_era5.nc'))
+en34_hadisst = xr.load_dataarray(os.path.join(hadisst_dir, 'nino34_long_anom.nc')).sel(time=pd.date_range('19510101', '20201231', freq='MS'))
+
+
 
 # %%
 # Plots of Nino 3.4
@@ -1769,7 +2254,8 @@ m=0
 da_dict = {f'ACE2-NEMO-control m{m}': en34_ace2nemo_ctl_da, 
            f'ACE2-NEMO-hist m{m}': en34_ace2nemo_hist_da,
            f'ECE3P-control': en34_da_ece_control,
-           'ERA5': en34_era5}
+           # 'ERA5': en34_era5,
+            'HadISST': en34_hadisst.sel()}
 shift_scaling = 7
 shifts = np.array(sorted(shift_scaling*np.arange(len(da_dict)), reverse=True))
 
@@ -1787,10 +2273,13 @@ for n, (label, da) in enumerate(da_dict.items()):
 ax.set_title("")
 ax.set_ylabel("Niño 3.4")
 ax.set_xlabel('Time')
-yticks = list(chain.from_iterable([[s-2, s, s+2] for s in shifts]))
+yticks = [-5] + list(chain.from_iterable([[s-2, s, s+2] for s in shifts]))
 ax.set_yticks(yticks)
-ytick_labels = [-2, 0, 2]*len(shifts)
-ax.set_yticklabels([-2, 0, 2]*len(shifts))
+ytick_labels = [""] + [-2, 0, 2]*len(shifts)
+ax.set_yticklabels(ytick_labels)
+
+
+plt.legend(ncols=4, loc='lower center')
 plt.savefig(os.path.join(MANUSCRIPT_FIGURE_DIR, f'nino_3.4_comparison.pdf'), format='pdf', bbox_inches='tight')
 
 # %%
@@ -1799,7 +2288,7 @@ mpl.style.use('default')
 fig, ax = plt.subplots(1,1, figsize=(10,4))
 
 for m in range(3):
-    en34_da.sel(member=m).plot(ax=ax, label=f'ACE2-NEMO-control m{m}')
+    en34_ace2nemo_ctl_da.sel(member=m).plot(ax=ax, label=f'ACE2-NEMO-control m{m}')
 ax.set_title(f"")
 ax.set_ylabel("Niño 3.4")
 
@@ -1807,7 +2296,7 @@ ax.set_ylabel("Niño 3.4")
 # ax.set_xticklabels(new_tick_labels)
 ax.set_xlabel('Time')
 
-en34_da_ece.plot(ax=ax, label='ECE3P-control', color='grey', linestyle='--')
+en34_da_ece_control.plot(ax=ax, label='ECE3P-control', color='grey', linestyle='--')
 ax.set_title(f"")
 ax.set_ylabel("Niño 3.4")
 ax.set_ylim([-2,2])
@@ -2303,23 +2792,116 @@ for n, (var1, var2) in enumerate(bjerknes_vars):
 # bjerknes_correlations_ece[[f'{var1}__{var2}']['slope'].transpose("latitude", "longitude")
 
 # %%
+
+# %% [markdown]
+# ## ENSO spectra
+
+# %%
+from scipy.signal import welch
+import xarray as xr
+import os, sys
+import numpy as np
+import matplotlib.pyplot as plt
+import pandas as pd
+import pickle
+import matplotlib.pyplot as plt
+from matplotlib import gridspec
+import cartopy.crs as ccrs
+import cartopy.feature as cfeature
+import cartopy.mpl.ticker as cticker
+import matplotlib.style
+import matplotlib as mpl
+from matplotlib import colormaps
+
+mpl.style.use('default')
+
+sys.path.append('/perm/ecme4254/repos/ace2_nemo_coupler')
+from notebooks.coupling_processing_utils import relative_nino34, remove_polynomial_trend, calculate_en34_spectra
+
+BASE_DATA_DIR = '/perm/ecme4254/repos/ace2_nemo_coupler/notebooks/processed_data'
+ace2_nemo_control_dir = os.path.join(BASE_DATA_DIR, 'n3.6_ace2_1951_control_compressed_19510101-20210101')
+ace2_nemo_hist_dir = os.path.join(BASE_DATA_DIR, 'n3.6_ace2_1951-2021_hist_compressed_19510101-20210101')
+ace2_fluxes_dir = os.path.join(BASE_DATA_DIR, 'n3.6_ace2_1951_ace2iceflux_19510101-20210101')
+ace2_nemo_skintemp_dir = os.path.join(BASE_DATA_DIR, 'n3.6_ace2_histor ical_skt_19510101-20210101')
+ace2_nemo_nofwb_dir = os.path.join(BASE_DATA_DIR, 'n3.6_ace2_noFWB_19510101-19530101')
+ace2_nemo_noIceFluxMask_dir = os.path.join(BASE_DATA_DIR, 'n3.6_ace2_no_icefluxmask_19510101-19530101')
+ENSO_SPECTRA_DIR = '/perm/ecme4254/repos/ace2_nemo_coupler/notebooks/processed_data/enso_spectra'
+
+ace2_forced_dir = os.path.join(BASE_DATA_DIR, 'ace2_forced')
+ace2_forced_ece3_dir = os.path.join(BASE_DATA_DIR, 'ace2_forced_ece3P_control_70years')
+samudrace_dir = os.path.join(BASE_DATA_DIR, 'samudrace')
+
+ece_control_dir = os.path.join(BASE_DATA_DIR, 'EC-Earth3P_control-1950')
+ece_hist_dir = os.path.join(BASE_DATA_DIR, 'EC-Earth3P_hist-1950')
+ece_historical_dir = os.path.join(BASE_DATA_DIR, 'EC-Earth3_historical')
+era5_dir =  os.path.join(BASE_DATA_DIR, 'ERA5')
+hadisst_dir = os.path.join(BASE_DATA_DIR, 'HadISST')
+
+
+# %%
+calculation_type = 'basic'
+
+if calculation_type != 'basic':
+    suffix = f'_{calculation_type}'
+else:
+    suffix = ''
+
+en34_da_control = xr.concat([xr.open_dataarray(os.path.join(ace2_nemo_control_dir, f'nino3_4{suffix}_m{m}.nc')).drop_vars("member", errors="ignore")  # remove existing variable if present
+        .assign_coords(member=m) for m in range(3)], dim='member')
+en34_da_hist = xr.concat([xr.open_dataarray(os.path.join(ace2_nemo_hist_dir, f'nino3_4{suffix}_m{m}.nc')).drop_vars("member", errors="ignore")  # remove existing variable if present
+        .assign_coords(member=m) for m in range(3)], dim='member')
+
+en34_da_ece_control = xr.open_dataarray(os.path.join(ece_control_dir, f'nino3_4_ece3{suffix}.nc'))
+en34_da_era5 = xr.open_dataarray(os.path.join(era5_dir, f'nino3_4_era5{suffix}.nc'))
+
+
+# %%
+if calculation_type == 'basic':
+    en34_da_hadisst =  xr.open_dataarray(os.path.join(hadisst_dir, f'nino34_long_anom.nc'))
+elif calculation_type == 'relative':
+    hadisst_data = xr.load_dataset("/home/ecme4254/hpcperm/hadisst/HadISST_sst.nc")['sst']
+    hadisst_data = hadisst_data.assign_coords(
+        time=xr.date_range(
+            start=f"{int(hadisst_data.time.dt.year[0]):04d}-{int(hadisst_data.time.dt.month[0]):02d}-01",
+            periods=hadisst_data.sizes["time"],
+            freq="MS",
+            calendar=hadisst_data.time.dt.calendar,
+            use_cftime=None,
+        )
+    )
+    hadisst_data = hadisst_data.sel(time=pd.date_range('19510101', '20201231', freq='MS'))
+    en34_da_hadisst = relative_nino34(hadisst_data)
+
+# %%
+npserseg=256
+nfft=1024
+fs=1
+
+fs_ece_control, ps_ece3 = calculate_en34_spectra(en34_da_ece_control, nperseg=npserseg, nfft=nfft, fs=fs)
+fs_era5, ps_era5 = calculate_en34_spectra(en34_da_era5, nperseg=npserseg, nfft=nfft, fs=fs)
+fs_hadisst, ps_hadisst = calculate_en34_spectra(en34_da_hadisst, nperseg=npserseg, nfft=nfft, fs=fs)  
+
+# %%
+ps_acenemo_ctrl = []
+ps_acenemo_hist = []
+for m in range(3):
+    _, tmp_ps_control = calculate_en34_spectra(en34_da_control.sel(member=m), nperseg=npserseg, nfft=nfft, fs=fs)
+    _, tmp_ps_hist = calculate_en34_spectra(en34_da_hist.sel(member=m), nperseg=npserseg, nfft=nfft, fs=fs)  
+
+    ps_acenemo_ctrl.append(tmp_ps_control)
+    ps_acenemo_hist.append(tmp_ps_hist)
+
+
+ps_acenemo_ctrl = np.stack(ps_acenemo_ctrl).mean(axis=0)
+ps_acenemo_hist = np.stack(ps_acenemo_hist).mean(axis=0)
+
+
+# %%
 with open(os.path.join(ace2_nemo_hist_dir, f'enso_spectra_dict.pkl'), 'rb') as ifh:
     enso_spectra_dict = pickle.load(ifh)
 
 with open(os.path.join(ece_hist_dir, f'enso_spectra_dict.pkl'), 'rb') as ifh:
    ece_enso_spectra_dict = pickle.load(ifh)
-
-
-# %%
-def calculate_en34_spectra(da, fs =12, scaling='density'):
-
-    nperseg = np.min([40*12, len(da['time'].values)])
-    
-    nino34_series =  da.sortby('time')
-    f, Pxx = signal.welch(nino34_series, fs=fs, nperseg=nperseg, detrend='linear', scaling=scaling)
-
-    return f, Pxx
-
 
 # %%
 from scipy import signal
@@ -2347,7 +2929,7 @@ plot_axs = [[fig.add_subplot(gs[:, 0])] + [fig.add_subplot(gs[0, n+1], projectio
 
 
 # Power spectral density
-fs = 12
+fs = 1
 scaling='density'
 
 
@@ -2355,10 +2937,6 @@ scaling='density'
 fs = np.loadtxt(os.path.join(ENSO_SPECTRA_DIR, 'frequencies.txt'))
 fs_ar1 = np.loadtxt(os.path.join(ENSO_SPECTRA_DIR, 'frequencies_ar1.txt'))
 
-ps_acenemo_hist = np.loadtxt(os.path.join(ENSO_SPECTRA_DIR, 'n34_power_acenemo_hist.txt'))
-ps_acenemo_ctrl = np.loadtxt(os.path.join(ENSO_SPECTRA_DIR, 'n34_power_acenemo_ctrl.txt'))
-ps_era5 = np.loadtxt(os.path.join(ENSO_SPECTRA_DIR, 'n34_power_era5.txt'))
-ps_ece3 = np.loadtxt(os.path.join(ENSO_SPECTRA_DIR, 'n34_power_ece3.txt'))
 ps_ar1 = np.loadtxt(os.path.join(ENSO_SPECTRA_DIR, 'power_ar1.txt'))
 
 ps_ar1_acenemo_ctrl = np.loadtxt(os.path.join(ENSO_SPECTRA_DIR, 'power_ar1_acenemo_ctrl.txt'))
@@ -2366,22 +2944,12 @@ power_upper_ar1_acenemo = np.loadtxt(os.path.join(ENSO_SPECTRA_DIR, 'power_upper
 power_lower_ar1_acenemo = np.loadtxt(os.path.join(ENSO_SPECTRA_DIR, 'power_lower_ar1_acenemo_ctrl.txt'))
 
 
-# enso_spectra_dict = {}
-# P_arr = []
-# P_arr_hist = []
-# f_arr = []
-# for m in range(3):
-#     en34_da = xr.load_dataarray(os.path.join(ace2_nemo_control_dir, f'nino3_4_smoothed_m{m}.nc')).dropna(dim='time')
-#     en34_hist_da = xr.load_dataarray(os.path.join(ace2_nemo_hist_dir, f'nino3_4_smoothed_m{m}.nc')).dropna(dim='time')
-#     f, Pxx = calculate_en34_spectra(en34_da, fs=fs, scaling=scaling)
-#     f_hist, Pxx_hist = calculate_en34_spectra(en34_hist_da, fs=fs, scaling=scaling)
-#     P_arr.append(Pxx[1:])
-#     P_arr_hist.append(Pxx_hist[1:])
+plot_axs[0][0].plot(fs_era5, ps_era5, 'k-', lw=2, label='ERA5')
+plot_axs[0][0].plot(fs_era5, ps_hadisst, color=colormaps['tab10'].colors[1], lw=2, label='HadISST')
 
-plot_axs[0][0].plot(fs, ps_era5, 'k-', lw=2, label='ERA5')
-plot_axs[0][0].plot(fs, ps_acenemo_ctrl, color=colormaps['tab10'].colors[0], lw=2, label='ACE2-NEMO-control')
-plot_axs[0][0].plot(fs, ps_acenemo_hist, color=colormaps['tab10'].colors[0], linestyle='--', lw=2, label='ACE2-NEMO-hist')
-plot_axs[0][0].plot(fs, ps_ece3, color=colormaps['tab10'].colors[3], lw=2, label='ECE3P-control')
+plot_axs[0][0].plot(fs_era5, ps_acenemo_ctrl, color=colormaps['tab10'].colors[0], lw=2, label='ACE2-NEMO-control')
+plot_axs[0][0].plot(fs_era5, ps_acenemo_hist, color=colormaps['tab10'].colors[0], linestyle='--', lw=2, label='ACE2-NEMO-hist')
+plot_axs[0][0].plot(fs_era5, ps_ece3, color=colormaps['tab10'].colors[3], lw=2, label='ECE3P-control')
 plot_axs[0][0].plot(fs_ar1, ps_ar1_acenemo_ctrl, color=colormaps['Set1'].colors[-1], linestyle='--', label='Theoretical AR1')
 plot_axs[0][0].fill_between(fs, power_upper_ar1_acenemo, power_lower_ar1_acenemo, color=colormaps['Set1'].colors[-1], alpha=0.3)
 
@@ -2390,6 +2958,7 @@ plot_axs[0][0].set_ylabel('Power/Hz')
 ticks = [0.,1./60, 1/36., 1/24., 1/18., 1/12., 1/9.]
 plot_axs[0][0].set_xticks(ticks)
 plot_axs[0][0].set_xlim([0.0, np.max(fs)])
+plot_axs[0][0].set_ylim([0.0, 30])
 labels = plot_axs[0][0].get_xticks().tolist()
 months = [int(round(1.0/x,1)) for x in labels if x > 0]
 months = ['T'] + months
@@ -2398,38 +2967,13 @@ plot_axs[0][0].legend()
 # plot_axs[0][0].grid()
 plot_axs[0][0].set_title('a) ENSO Power Spectrum Density')
 
-# plot_axs[0][0].plot(f[1:], np.array(P_arr).mean(axis=0), label=f'ACE2-NEMO-control', color='b')
-# plot_axs[0][0].plot( f[1:], np.array(P_arr_hist).mean(axis=0), label=f'ACE2-NEMO-hist', color='b', linestyle='--')
-
-# Calcualte spectra for ERA5
-# era5_nino34_series =  xr.load_dataarray(os.path.join(era5_dir, f'nino3_4_era5.nc')).dropna(dim='time').sortby('time').dropna(dim='time')
-# # era5_nino34_detrended = signal.detrend(era5_nino34_series.values)
-# f, Pxx = calculate_en34_spectra(era5_nino34_series, fs=fs, scaling=scaling)
-# plot_axs[0][0].plot(f[1:], Pxx[1:] , label='ERA5', color='k')
-
-# ece_nino34_series =  xr.load_dataarray(os.path.join(ece_control_dir, f'nino3_4_ece3.nc')).dropna(dim='time').sortby('time').dropna(dim='time')
-# f, Pxx = calculate_en34_spectra(ece_nino34_series, fs=fs, scaling=scaling)
-# plot_axs[0][0].plot( f[1:], Pxx[1:], label='ECE3P-control', color='r')
-
-# # ece_nino34_series =  xr.load_dataarray(os.path.join(ece_hist_dir, f'nino3_4_ece3.nc')).dropna(dim='time').sortby('time').dropna(dim='time')
-# # f, Pxx = calculate_en34_spectra(ece_nino34_series, fs=fs)
-# # plot_axs[0][0].plot( f[1:], Pxx[1:], label='ECE3P-hist', color='r', linestyle='--')
-
-# plot_axs[0][0].set_xlabel('Frequency [cycles per year]')
-# plot_axs[0][0].set_ylabel(r'Power [$K^2 / (\text{cycles per year})$]')
-# plot_axs[0][0].set_xscale('log')
-# plot_axs[0][0].set_xlim([1/(10),None])
-# # enso_spectra_dict['ERA5'] = {'period': 1 / f[1:], 'power': Pxx[1:]*f[1:], 'Pxx': Pxx, 'f': f}
-# plot_axs[0][0].legend()
-# plot_axs[0][0].set_title('a)')
-
 
 ####################################################
 ## Precip correlation
 da_list = [xr.load_dataset(os.path.join(ace2_nemo_control_dir, 'nino3_4_stats_total_precipitation_daily_m0.nc'))['slope'], 
-           xr.load_dataset(os.path.join(ece_control_dir, 'ece3_nino3_4_stats.nc'))['slope']]
+           xr.load_dataset(os.path.join(era5_dir, 'era5_nino3_4_stats.nc'))['slope']]
 
-title_list = ['b) ACE2-NEMO-control', 'c) ECE3P-control']
+title_list = ['b) ACE2-NEMO-control', 'c) ERA5']
 
 for n, da in enumerate(da_list):
     im = da.plot(ax=plot_axs[0][n+1],
@@ -2459,8 +3003,8 @@ da_grid = [ [ace2_nemo_control_time_mean_state_dict['All'][varname].transpose('l
 num_cols = 2
 num_rows = 2
 cbar_labels= [f"{name_lookup[varname]['name']} mean [{name_lookup[varname]['units']}]" for varname in plot_vars]
-titles_grid = [['a) ACE2-NEMO-control - ECE3P-control', 'b) ACE2-ECE3P-forced - ECE3P-control'], 
-               ['c) ACE2-NEMO-control - ECE3P-control', 'd) ACE2-ECE3P-forced - ECE3P-control']]
+titles_grid = [['a) ACE2-NEMO-control - ECE3P-control', 'b) ACE2-ECE3P-prescribed - ECE3P-control'], 
+               ['c) ACE2-NEMO-control - ECE3P-control', 'd) ACE2-ECE3P-prescribed - ECE3P-control']]
 vmax_vals = [2, 5]
 vmin_vals = [-1*v for v in vmax_vals]
 cmaps = ['RdBu_r' for varname in plot_vars]
@@ -2482,7 +3026,7 @@ plt.savefig(os.path.join(MANUSCRIPT_FIGURE_DIR, f"mean_state_biases_comparison.p
 
 # %%
 ece3_response = xr.load_dataset(os.path.join(ece_control_dir, 'ece3_nino3_4_stats.nc'))['slope']
-
+erea5_response = xr.load_dataset(os.path.join(era5_dir, 'era5_nino3_4_stats.nc'))['slope']
 ## Precip correlation
 da_grid = [[xr.load_dataset(os.path.join(ace2_nemo_control_dir, 'nino3_4_stats_total_precipitation_daily_m0.nc'))['slope'] - ece3_response, 
            xr.load_dataset(os.path.join(ace2_forced_ece3_dir, 'nino3_4_stats_total_precipitation_daily_m0.nc'))['slope']- ece3_response]]
@@ -2491,10 +3035,10 @@ da_grid = [[xr.load_dataset(os.path.join(ace2_nemo_control_dir, 'nino3_4_stats_t
 num_cols = 2
 num_rows = 1
 cbar_labels= ['Niño 3.4 Precipitation Regression difference [mm/day/K]']*2
-titles_grid = [['a) ACE2-NEMO-control - ECE3P-control', 'b) ACE2-ECE3P-forced - ECE3P-control']]
+titles_grid = [['a) ACE2-NEMO-control - ECE3P-control', 'b) ACE2-ECE3P-prescribed - ECE3P-control']]
 vmax_vals = [2,2]
 vmin_vals = [-1*v for v in vmax_vals]
-cmaps = ['RdBu_r' for varname in plot_vars]
+cmaps = ['RdBu_r']*2
 
 plot_map_grid_cbar_by_row(da_grid,
                                 cbar_labels,
@@ -2509,5 +3053,35 @@ plot_map_grid_cbar_by_row(da_grid,
                                 cbar_height_ratio=0.02,
                                 )
 plt.savefig(os.path.join(MANUSCRIPT_FIGURE_DIR, f"enso_regression_comparison.pdf"), format='pdf', bbox_inches='tight')
+
+# %%
+era5_response = xr.load_dataset(os.path.join(era5_dir, 'era5_nino3_4_stats.nc'))['slope']
+## Precip correlation
+da_grid = [[xr.load_dataset(os.path.join(ace2_nemo_control_dir, 'nino3_4_stats_total_precipitation_daily_m0.nc'))['slope'] - era5_response, 
+           xr.load_dataset(os.path.join(ace2_forced_ece3_dir, 'nino3_4_stats_total_precipitation_daily_m0.nc'))['slope']- era5_response,
+           xr.load_dataset(os.path.join(ece_control_dir, 'ece3_nino3_4_stats.nc'))['slope'] - era5_response]]
+
+
+num_cols = len(da_grid[0])
+num_rows = 1
+cbar_labels= ['Niño 3.4 Precipitation Regression difference [mm/day/K]']*2
+titles_grid = [['a) ACE2-NEMO-control - ERA5', 'b) ACE2-ECE3P-prescribed - ERA5', 'c) ECE3P-control - ERA5']]
+vmax_vals = [3,3]
+vmin_vals = [-1*v for v in vmax_vals]
+cmaps = ['RdBu_r']*3
+
+plot_map_grid_cbar_by_row(da_grid,
+                                cbar_labels,
+                                titles_grid ,
+                                vmax_vals,
+                                vmin_vals,
+                                  projection=ccrs.Robinson(central_longitude=180),
+                                  cmaps=cmaps,
+                                width_height_ratio = [6,4],
+                                shrink_factor= 0.6,
+                                wspace=0.001,
+                                cbar_height_ratio=0.02,
+                                )
+plt.savefig(os.path.join(MANUSCRIPT_FIGURE_DIR, f"enso_regression_comparison_era5.pdf"), format='pdf', bbox_inches='tight')
 
 # %%

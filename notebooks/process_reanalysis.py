@@ -48,7 +48,7 @@ sys.path.append('/perm/ecme4254/repos/ace2_nemo_coupler')
 from notebooks.coupling_processing_utils import detrend_dataarray, \
     convert_dts_to_first_of_month, calculate_en34 ,calculate_linear_relationship, \
     mean_areas, calculate_en34_spectra, bjerknes_feedback_analysis, calculate_nino_index, calculate_anomalies, \
-    load_era5_monthly, calculate_lagged_correlations, is_notebook
+    load_era5_monthly, calculate_lagged_correlations, is_notebook, relative_nino34
 
 BASE_OUTPUT_DIR = '/perm/ecme4254/repos/ace2_nemo_coupler/notebooks/processed_data'
 era5_dir = "/home/ecme4254/scratch/era5_monthly"
@@ -274,23 +274,30 @@ years = sorted(set(era5_ds['time.year'].values))
 # %%
 en34_da_era5 = calculate_en34(era5_ds['sea_surface_temperature'])
 en34_da_era5_seasonal = calculate_en34(era5_ds['sea_surface_temperature'], remove_seasonal_cycle=False)
+en34_da_era5_relative = relative_nino34(era5_ds['sea_surface_temperature'])
 
 # %%
 if not is_notebook():
     print(f'Saving Nino data to {OUTPUT_DIR}')
     en34_da_era5.to_netcdf(os.path.join(OUTPUT_DIR, 'nino3_4_era5.nc'))
-    en34_da_era5.to_netcdf(os.path.join(OUTPUT_DIR, 'nino3_4_era5_seasonal.nc'))
+    en34_da_era5_seasonal.to_netcdf(os.path.join(OUTPUT_DIR, 'nino3_4_era5_seasonal.nc'))
+    en34_da_era5_relative.to_netcdf(os.path.join(OUTPUT_DIR, 'nino3_4_era5_relative.nc'))
 
 
 # %%
 from scipy.stats import t
 # Currently just doing this for one enesmble member
+en34_dict = {'basic': en34_da_era5,
+            'relative': en34_da_era5_relative}
 
-x = en34_da_era5
-y = era5_ds['total_precipitation_daily'] # Already converted to mm/day
-era5_nino_stats_ds = calculate_linear_relationship(x,y)
+for k, da in en34_dict.items():
+    x = da
+    y = era5_ds['total_precipitation_daily'] # Already converted to mm/day
+    era5_nino_stats_ds = calculate_linear_relationship(x,y)
+
+
+    if not is_notebook():
+        print(f'Saving Nino stats data to {OUTPUT_DIR}')
+        era5_nino_stats_ds.to_netcdf(os.path.join(OUTPUT_DIR, f'era5_nino3_4_stats_{k}.nc'))
 
 # %%
-if not is_notebook():
-    print(f'Saving Nino stats data to {OUTPUT_DIR}')
-    era5_nino_stats_ds.to_netcdf(os.path.join(OUTPUT_DIR, 'era5_nino3_4_stats.nc'))

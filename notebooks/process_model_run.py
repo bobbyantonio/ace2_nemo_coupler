@@ -31,24 +31,23 @@ from itertools import chain
 # os.environ['ESMFMKFILE'] = esmkfile_path
 import xarray_regrid
 import xesmf as xe
-import xarray_regrid
 
 sys.path.append("/home/ecme4254/perm/repos/ace2_nemo_coupler")
 from notebooks.coupling_processing_utils import detrend_dataarray, \
     convert_dts_to_first_of_month, calculate_en34 ,calculate_linear_relationship, \
     mean_areas, calculate_en34_spectra, vertical_integral, load_ds_subset, load_nemo_ds_subset,\
     calculate_correlation, OLEVEL_VALUES, OLEVEL_BIN_EDGES, calculate_lagged_correlations, calculate_anomalies, \
-    bjerknes_feedback_analysis, calculate_nino_index, is_notebook
+    bjerknes_feedback_analysis, calculate_nino_index, is_notebook, relative_nino34
 
 BASE_OUTPUT_DIR = '/home/ecme4254/perm/repos/ace2_nemo_coupler/notebooks/processed_data'
 
 # %%
 if is_notebook():
-    experiment_id = 'n3.6_ace2_noFWB_19510101-19530101'
+    experiment_id = 'n3.6_ace2_1951_control_compressed_19510101-20210101'
     ensemble_members = [0]
     glob_str = '195*'
-    # model_run_dir='/home/ecme4254/perm/old_model_runs'
-    model_run_dir ='/home/ecme4254/hpcperm/model_runs'
+    model_run_dir='/home/ecme4254/perm/old_model_runs'
+    # model_run_dir ='/home/ecme4254/hpcperm/model_runs'
 
     components = ''
     month_lag_max = 0
@@ -379,14 +378,14 @@ filtered_land_mask = xr.DataArray(
     )
 )
 
-masked_points = xr.where(ice_mask, xr.where(filtered_land_mask>0, 1, 0), 0)
+masked_points = xr.where(tmp_ice_mask, xr.where(filtered_land_mask>0, 1, 0), 0)
 
 if not debug:
     masked_points.to_netcdf(os.path.join(OUTPUT_DIR, f'masked_ice_flux_points.nc'))
 
 # Annoyingly the sea ice fraction thresholds are inconsistent...
 # But the threshold here is more accomodating, so it doesn't lead to inconsistencies
-for v in ['solar_flux_over_ice', 'total_non_solar_flux_ice']:
+for v in ['solar_flux_over_ice', 'total_non_solar_flux_ice', 'total_heat_flux_ice']:
     experiment_ds[v] = xr.where(tmp_ice_mask, experiment_ds[v], np.nan)
     experiment_ds[f'coastal_masked_{v}'] = xr.where(tmp_ice_mask, xr.where(filtered_land_mask>0, 0, experiment_ds[v]), experiment_ds[v])
 
@@ -634,6 +633,7 @@ for m in ensemble_members:
     en34_da = calculate_nino_index(experiment_ds['sea_surface_temperature'].sel(member=m), nino_region=3.4)
     en34_da_smoothed = calculate_nino_index(experiment_ds['sea_surface_temperature'].sel(member=m), rolling_window=5, nino_region=3.4)
     en34_da_seasonal = calculate_nino_index(experiment_ds['sea_surface_temperature'].sel(member=m), remove_seasonal_cycle=False, nino_region=3.4)
+    en34_da_relative = relative_nino34(experiment_ds['sea_surface_temperature'].sel(member=m))
 
     en3_da = calculate_nino_index(experiment_ds['sea_surface_temperature'].sel(member=m), nino_region=3)
 
@@ -642,22 +642,28 @@ for m in ensemble_members:
         en34_da.to_netcdf(os.path.join(OUTPUT_DIR, f'nino3_4_m{m}.nc'))
         en34_da_smoothed.to_netcdf(os.path.join(OUTPUT_DIR, f'nino3_4_smoothed_m{m}.nc'))
         en34_da_seasonal.to_netcdf(os.path.join(OUTPUT_DIR, f'nino3_4_seasonal_m{m}.nc'))
+        en34_da_relative.to_netcdf(os.path.join(OUTPUT_DIR, f'nino3_4_relative_m{m}.nc'))
 
-    for var in ['total_precipitation_daily', 'surface_pressure', '10m_u_component_of_wind', 'instantaneous_eastward_turbulent_surface_stress']:
+    for var in ['total_precipitation_daily', 
+                'surface_pressure', 
+                '10m_u_component_of_wind', 
+                'instantaneous_eastward_turbulent_surface_stress']:
         y = experiment_ds[var].sel(member=m)
         
         nino_stats_ds = calculate_linear_relationship(en34_da,y)
         nino_stats_smoothed_ds = calculate_linear_relationship(en34_da_smoothed,y)
         nino_stats_seasonal_ds = calculate_linear_relationship(en34_da_seasonal,y)
+        nino_stats_relative_ds = calculate_linear_relationship(en34_da_relative,y)
 
-        # if not debug:
-        print(f'Saving Nino stats data to {OUTPUT_DIR}')
-        nino_stats_ds.to_netcdf(os.path.join(OUTPUT_DIR, f'nino3_4_stats_{var}_m{m}.nc'))
-        nino_stats_smoothed_ds.to_netcdf(os.path.join(OUTPUT_DIR, f'nino3_4_stats_{var}_smoothed_m{m}.nc'))
-        nino_stats_seasonal_ds.to_netcdf(os.path.join(OUTPUT_DIR, f'nino3_4_stats_{var}_seasonal_m{m}.nc'))
-
-        nino_3_stats_ds = calculate_linear_relationship(en3_da,y)
-        nino_stats_ds.to_netcdf(os.path.join(OUTPUT_DIR, f'nino3_stats_{var}_m{m}.nc'))
+        if not debug:
+            print(f'Saving Nino stats data to {OUTPUT_DIR}')
+            nino_stats_ds.to_netcdf(os.path.join(OUTPUT_DIR, f'nino3_4_stats_{var}_m{m}.nc'))
+            nino_stats_smoothed_ds.to_netcdf(os.path.join(OUTPUT_DIR, f'nino3_4_stats_{var}_smoothed_m{m}.nc'))
+            nino_stats_seasonal_ds.to_netcdf(os.path.join(OUTPUT_DIR, f'nino3_4_stats_{var}_seasonal_m{m}.nc'))
+            nino_stats_relative_ds.to_netcdf(os.path.join(OUTPUT_DIR, f'nino3_4_stats_{var}_relative_m{m}.nc'))
+            
+            nino_3_stats_ds = calculate_linear_relationship(en3_da,y)
+            nino_stats_ds.to_netcdf(os.path.join(OUTPUT_DIR, f'nino3_stats_{var}_m{m}.nc'))
 
 # %%
 # nperseg = np.min([40*12, len(en34_da['time'].values)])

@@ -43,11 +43,13 @@ mpl.style.use('default')
 # %%
 # Directories for the different experiments
 # BASE_DATA_DIR = '/gws/nopw/j04/eerie/cache/bantonio/processed_spinup_data'
-BASE_DATA_DIR = '/home/users/bantonio/repos/ace2_nemo_coupler/notebooks/processed_data/'
-ece3_spinup_dir = os.path.join(BASE_DATA_DIR, 'EC-Earth3_piControl')
+# BASE_DATA_DIR = '/home/users/bantonio/repos/ace2_nemo_coupler/notebooks/processed_data/'
+BASE_DATA_DIR='/home/ecme4254/perm/repos/ace2_nemo_coupler/notebooks/processed_data'
+ece3_spinup_dir = os.path.join(BASE_DATA_DIR, 'n3.6_ace2_spinupCMIP6_laplacian_19510101-21010101')
 
 # ace2_data_dir = '/gws/nopw/j04/eerie/cache/bantonio/ace2_data'
-ace2_data_dir = '/home/users/bantonio'
+# ace2_data_dir = '/home/users/bantonio'
+ace2_data_dir = "/home/ecme4254/hpcperm/ml_model_data/ace2"
 sea_mask = xr.load_dataarray(os.path.join(ace2_data_dir, "era5_sea_mask_ACE2.nc"))
 
 # %%
@@ -132,7 +134,8 @@ for n, var in enumerate(vars_to_plot):
         aggregation='UnweightedSum'
     else:
         aggregation='mean'
-    ece_time_series = ece_spinup_mean_dict[area_name][aggregation][var].groupby('time.year').mean()
+    # ece_time_series = ece_spinup_mean_dict[area_name][aggregation][var].groupby('time.year').mean()
+    ece_time_series = ece_spinup_mean_dict[area_name][aggregation][var]
         
     h = (ece_time_series ).plot(ax=axs[row,col], label=label)    
 

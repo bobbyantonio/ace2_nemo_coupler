@@ -8,7 +8,6 @@
 #       jupytext_version: 1.17.1
 #   kernelspec:
 #     display_name: ece4
-#     display_name: ece4
 #     language: python
 #     name: ece4
 # ---
